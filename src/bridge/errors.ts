@@ -1,0 +1,43 @@
+export const ErrorCode = {
+  // Identity
+  TOKEN_MISSING: 'TOKEN_MISSING',
+  TOKEN_INVALID: 'TOKEN_INVALID',
+  DIRECTION_VIOLATION: 'DIRECTION_VIOLATION',
+  // Capability
+  CAPABILITY_DENIED: 'CAPABILITY_DENIED',
+  METHOD_NOT_FOUND: 'METHOD_NOT_FOUND',
+  // Payload
+  PAYLOAD_TOO_LARGE: 'PAYLOAD_TOO_LARGE',
+  PAYLOAD_INVALID: 'PAYLOAD_INVALID',
+  INVALID_PAYLOAD: 'INVALID_PAYLOAD',
+  // Rate limiting
+  RATE_LIMITED: 'RATE_LIMITED',
+  MAX_CONCURRENT_EXCEEDED: 'MAX_CONCURRENT_EXCEEDED',
+  // Protocol
+  VERSION_INCOMPATIBLE: 'VERSION_INCOMPATIBLE',
+  // Storage
+  STORAGE_QUOTA_EXCEEDED: 'STORAGE_QUOTA_EXCEEDED',
+  QUOTA_EXCEEDED: 'QUOTA_EXCEEDED',
+  // Fetch
+  FETCH_NOT_ALLOWED: 'FETCH_NOT_ALLOWED',
+  FETCH_FAILED: 'FETCH_FAILED',
+  FETCH_DOMAIN_DENIED: 'FETCH_DOMAIN_DENIED',
+  FETCH_REDIRECT_DENIED: 'FETCH_REDIRECT_DENIED',
+  FETCH_PRIVATE_IP_DENIED: 'FETCH_PRIVATE_IP_DENIED',
+  FETCH_RESPONSE_TOO_LARGE: 'FETCH_RESPONSE_TOO_LARGE',
+  FETCH_NETWORK_ERROR: 'FETCH_NETWORK_ERROR',
+  // Client-side (used in BridgeClient injected script)
+  TIMEOUT: 'TIMEOUT',
+} as const;
+
+export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
+
+export class BridgeError extends Error {
+  constructor(
+    public readonly code: ErrorCode,
+    message?: string,
+  ) {
+    super(message ?? code);
+    this.name = 'BridgeError';
+  }
+}
