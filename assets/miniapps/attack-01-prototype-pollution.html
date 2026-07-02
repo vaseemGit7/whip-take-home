@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Attack #1 — Prototype Pollution</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, sans-serif; padding: 14px; background: #0f0f1a; color: #e0e0e0; margin: 0; }
+    h1 { font-size: 16px; color: #ff6b6b; margin: 0 0 2px; }
+    .num { display: inline-block; background: #ff4444; color: white; font-size: 10px; font-weight: 700;
+      padding: 1px 6px; border-radius: 3px; margin-right: 4px; }
+    .subtitle { font-size: 11px; color: #888; margin: 0 0 12px; }
+    .threat { background: #1a0a0a; border: 1px solid #662222; border-radius: 6px;
+      padding: 10px 12px; font-size: 11px; font-family: monospace; color: #ff9999;
+      margin: 10px 0; white-space: pre; }
+    button { width: 100%; padding: 13px; border-radius: 8px; border: none;
+      background: #cc2222; color: white; font-size: 14px; font-weight: 700;
+      cursor: pointer; margin: 10px 0; letter-spacing: 0.3px; }
+    button:active { opacity: 0.8; }
+    .result { border-radius: 8px; padding: 12px 14px; margin: 8px 0; display: none; }
+    .result.show { display: block; }
+    .blocked   { background: #0a1f14; border: 1px solid #00cc77; }
+    .blocked h3 { color: #00cc77; font-size: 13px; margin: 0 0 6px; }
+    .vuln      { background: #200a0a; border: 1px solid #ff3333; }
+    .vuln h3   { color: #ff3333; font-size: 13px; margin: 0 0 6px; }
+    .detail    { font-family: monospace; font-size: 10px; color: #aaa; margin-top: 6px; white-space: pre-wrap; }
+    #bridge-state { font-size: 10px; color: #666; margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+  <h1><span class="num">ATK 1</span> Prototype Pollution</h1>
+  <p class="subtitle">Injects __proto__ into a REQUEST payload to pollute Object.prototype on the host JS runtime.</p>
+  <div id="bridge-state">Bridge: connecting…</div>
+
+  <div class="threat">Payload sent:
+{
+  "__proto__": { "isAdmin": true, "role": "superuser" },
+  "key": "pwn",
+  "value": "hello"
+}
+
+Goal: host processes payload → Object.prototype.isAdmin === true</div>
+
+  <button onclick="runAttack()">⚡ Launch Prototype Pollution</button>
+
+  <div id="res" class="result">
+    <h3>—</h3>
+    <p class="detail">—</p>
+  </div>
+
+  <script>
+    var _orig = window.__bridgeDispatch;
+    window.__bridgeDispatch = function(raw) {
+      var m = JSON.parse(raw);
+      if (m.type === 'HANDSHAKE_ACK') {
+        document.getElementById('bridge-state').textContent = 'Bridge: connected ✓';
+      }
+      if (_orig) _orig(raw);
+    };
+
+    function show(cls, title, detail) {
+      var el = document.getElementById('res');
+      el.className = 'result show ' + cls;
+      el.querySelector('h3').textContent = title;
+      el.querySelector('.detail').textContent = detail;
+    }
+
+    function runAttack() {
+      show('blocked', '⏳ Sending poisoned payload…', 'Waiting for host response…');
+
+      var msgId = 'poison-' + Date.now();
+      var token = window.__WHIP_SESSION_TOKEN__;
+
+      var prev = window.__bridgeDispatch;
+      window.__bridgeDispatch = function(raw) {
+        var m = JSON.parse(raw);
+        if (m.id === msgId) {
+          window.__bridgeDispatch = prev;
+          var polluted = ({}).isAdmin === true;
+          if (polluted) {
+            show('vuln', '🚨 ATTACK SUCCEEDED — Bridge is VULNERABLE',
+              'Object.prototype.isAdmin === true\nPrototype was polluted on host runtime!');
+          } else {
+            show('blocked', '✅ BLOCKED — sanitizePayload() stripped __proto__',
+              'Host response: ok=' + m.ok + '\n' +
+              'Object.prototype.isAdmin === ' + ({}).isAdmin + ' (not polluted)\n\n' +
+              'Defense: sanitize.ts uses Object.create(null) + skips __proto__ key\n' +
+              'Host processed {key, value} only — __proto__ never reached the handler.');
+          }
+        }
+        if (prev) prev(raw);
+      };
+
+      // Send raw REQUEST with __proto__ in payload
+      // JSON.stringify preserves __proto__ as a string key; JSON.parse on host
+      // creates an object where it is an OWN property that sanitizePayload must catch.
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'REQUEST',
+        id: msgId,
+        sessionToken: token,
+        capability: 'storage.kv',
+        method: 'set',
+        payload: {'__proto__': {isAdmin: true, role: 'superuser'}, key: 'pwn', value: 'hello'},
+        version: '1.0',
+        timestamp: Date.now(),
+      }));
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Attack #3 — Token Forgery</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, sans-serif; padding: 14px; background: #0f0f1a; color: #e0e0e0; margin: 0; }
+    h1 { font-size: 16px; color: #ff6b6b; margin: 0 0 2px; }
+    .num { display: inline-block; background: #ff4444; color: white; font-size: 10px; font-weight: 700;
+      padding: 1px 6px; border-radius: 3px; margin-right: 4px; }
+    .subtitle { font-size: 11px; color: #888; margin: 0 0 12px; }
+    .threat { background: #1a0a0a; border: 1px solid #662222; border-radius: 6px;
+      padding: 10px 12px; font-size: 11px; font-family: monospace; color: #ff9999;
+      margin: 10px 0; white-space: pre; }
+    button { width: 100%; padding: 13px; border-radius: 8px; border: none;
+      background: #cc2222; color: white; font-size: 14px; font-weight: 700;
+      cursor: pointer; margin: 6px 0; letter-spacing: 0.3px; }
+    button:active { opacity: 0.8; }
+    .result { border-radius: 8px; padding: 12px 14px; margin: 8px 0; display: none; }
+    .result.show { display: block; }
+    .blocked   { background: #0a1f14; border: 1px solid #00cc77; }
+    .blocked h3 { color: #00cc77; font-size: 13px; margin: 0 0 6px; }
+    .vuln      { background: #200a0a; border: 1px solid #ff3333; }
+    .vuln h3   { color: #ff3333; font-size: 13px; margin: 0 0 6px; }
+    .detail    { font-family: monospace; font-size: 10px; color: #aaa; margin-top: 6px; white-space: pre-wrap; }
+    #bridge-state { font-size: 10px; color: #666; margin-bottom: 10px; }
+    .token-row { font-size: 10px; font-family: monospace; margin: 4px 0; padding: 6px 8px;
+      background: #0e0e1e; border-radius: 4px; border-left: 2px solid #444; }
+    .real { border-left-color: #00cc77; }
+    .fake { border-left-color: #ff4444; }
+  </style>
+</head>
+<body>
+  <h1><span class="num">ATK 3</span> Token Forgery</h1>
+  <p class="subtitle">Sends a REQUEST using a forged 128-bit session token to impersonate another mini app.</p>
+  <div id="bridge-state">Bridge: connecting…</div>
+
+  <div class="token-row real">Real token (host-assigned): <span id="real-token">—</span></div>
+  <div class="token-row fake">Forged token (attacker):     ffffffffffffffffffffffffffffffff</div>
+
+  <div class="threat">Message sent with forged token:
+{
+  "type": "REQUEST",
+  "sessionToken": "ffffffffffffffffffffffffffffffff",
+  "capability": "storage.kv",
+  "method": "get",
+  "payload": { "key": "secret" }
+}
+
+Goal: access another app's storage using a guessed/forged token</div>
+
+  <button onclick="runForged()">⚡ Send Forged-Token Request</button>
+  <button onclick="runMissing()" style="background:#883300;">⚡ Send Missing-Token Request</button>
+
+  <div id="res" class="result">
+    <h3>—</h3>
+    <p class="detail">—</p>
+  </div>
+
+  <script>
+    var _orig = window.__bridgeDispatch;
+    window.__bridgeDispatch = function(raw) {
+      var m = JSON.parse(raw);
+      if (m.type === 'HANDSHAKE_ACK') {
+        document.getElementById('bridge-state').textContent = 'Bridge: connected ✓';
+        document.getElementById('real-token').textContent =
+          (window.__WHIP_SESSION_TOKEN__ || '').slice(0,8) + '…(32 hex chars)';
+      }
+      if (_orig) _orig(raw);
+    };
+
+    function show(cls, title, detail) {
+      var el = document.getElementById('res');
+      el.className = 'result show ' + cls;
+      el.querySelector('h3').textContent = title;
+      el.querySelector('.detail').textContent = detail;
+    }
+
+    function waitForResponse(msgId, label, onNone) {
+      var got = false;
+      var prev = window.__bridgeDispatch;
+      window.__bridgeDispatch = function(raw) {
+        var m = JSON.parse(raw);
+        if (m.id === msgId) { got = true; }
+        if (prev) prev(raw);
+      };
+      setTimeout(function() {
+        window.__bridgeDispatch = prev;
+        if (got) {
+          show('vuln', '🚨 ATTACK SUCCEEDED — ' + label, 'Host responded with data!');
+        } else {
+          onNone();
+        }
+      }, 2000);
+    }
+
+    function runForged() {
+      var msgId = 'forged-' + Date.now();
+      show('blocked', '⏳ Sending forged-token request…', 'Waiting 2 s…');
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'REQUEST', id: msgId,
+        sessionToken: 'ffffffffffffffffffffffffffffffff',  // forged — not in registry
+        capability: 'storage.kv', method: 'get',
+        payload: {key: 'secret'}, version: '1.0', timestamp: Date.now(),
+      }));
+      waitForResponse(msgId, 'Forged token accepted', function() {
+        show('blocked', '✅ BLOCKED — Forged token rejected (TOKEN_INVALID)',
+          'Host looked up "ffff…ffff" in token registry → not found → silent drop.\n\n' +
+          'Defense: 128-bit random token assigned by host.\n' +
+          'Probability of guessing: 1 / 2^128 ≈ 3 × 10⁻³⁹\n\n' +
+          'Token: ffffffffffffffffffffffffffffffff\nResult: silent drop, no oracle.');
+      });
+    }
+
+    function runMissing() {
+      var msgId = 'missing-' + Date.now();
+      show('blocked', '⏳ Sending request with no token field…', 'Waiting 2 s…');
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'REQUEST', id: msgId,
+        // sessionToken deliberately omitted
+        capability: 'storage.kv', method: 'get',
+        payload: {key: 'secret'}, version: '1.0', timestamp: Date.now(),
+      }));
+      waitForResponse(msgId, 'Missing token accepted', function() {
+        show('blocked', '✅ BLOCKED — Missing token rejected (TOKEN_MISSING)',
+          'Host found no sessionToken field → silent drop.\n\n' +
+          'Defense: null/undefined/empty token handled before registry lookup.\n' +
+          'Result: silent drop, no oracle.');
+      });
+    }
+  </script>
+</body>
+</html>

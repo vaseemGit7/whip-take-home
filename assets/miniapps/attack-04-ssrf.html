@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Attack #4 — SSRF / Private IP</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, sans-serif; padding: 14px; background: #0f0f1a; color: #e0e0e0; margin: 0; }
+    h1 { font-size: 16px; color: #ff6b6b; margin: 0 0 2px; }
+    .num { display: inline-block; background: #ff4444; color: white; font-size: 10px; font-weight: 700;
+      padding: 1px 6px; border-radius: 3px; margin-right: 4px; }
+    .subtitle { font-size: 11px; color: #888; margin: 0 0 12px; }
+    .threat { background: #1a0a0a; border: 1px solid #662222; border-radius: 6px;
+      padding: 10px 12px; font-size: 11px; font-family: monospace; color: #ff9999;
+      margin: 10px 0; white-space: pre; }
+    button { width: 100%; padding: 11px; border-radius: 8px; border: none;
+      background: #cc2222; color: white; font-size: 13px; font-weight: 700;
+      cursor: pointer; margin: 5px 0; }
+    button:active { opacity: 0.8; }
+    .target-list { margin: 10px 0; }
+    .target { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+      background: #141424; border-radius: 6px; margin: 4px 0; font-family: monospace; font-size: 11px; }
+    .target .url { flex: 1; color: #ffaa44; }
+    .target .badge { font-size: 10px; padding: 2px 6px; border-radius: 3px;
+      font-weight: 700; min-width: 60px; text-align: center; }
+    .badge-pending  { background: #333; color: #aaa; }
+    .badge-blocked  { background: #0a3320; color: #00cc77; }
+    .badge-vuln     { background: #3a0a0a; color: #ff4444; }
+    .detail    { font-family: monospace; font-size: 10px; color: #aaa; margin-top: 8px; white-space: pre-wrap; }
+    #bridge-state { font-size: 10px; color: #666; margin-bottom: 10px; }
+    #summary { border-radius: 8px; padding: 10px 12px; margin: 8px 0; display: none; }
+    #summary.show { display: block; }
+    #summary.blocked { background: #0a1f14; border: 1px solid #00cc77; }
+    #summary h3 { color: #00cc77; font-size: 13px; margin: 0 0 6px; }
+  </style>
+</head>
+<body>
+  <h1><span class="num">ATK 4</span> SSRF — Private IP Probe</h1>
+  <p class="subtitle">Uses bridge.fetch() to probe private IP ranges: loopback, RFC 1918, AWS metadata, IPv6.</p>
+  <div id="bridge-state">Bridge: connecting…</div>
+
+  <div class="threat">Goal: read internal services via the host's network interface
+  e.g. router admin pages, AWS EC2 metadata, Kubernetes API</div>
+
+  <button onclick="runAll()">⚡ Probe All Private Targets</button>
+
+  <div class="target-list" id="targets"></div>
+
+  <div id="summary">
+    <h3>—</h3>
+    <p class="detail">—</p>
+  </div>
+
+  <script>
+    var TARGETS = [
+      {url: 'https://127.0.0.1/',                   label: 'Loopback'},
+      {url: 'https://192.168.1.1/',                  label: 'RFC 1918 (router)'},
+      {url: 'https://10.0.0.1/',                     label: 'RFC 1918 (10.x)'},
+      {url: 'https://172.16.0.1/',                   label: 'RFC 1918 (172.16.x)'},
+      {url: 'https://169.254.169.254/latest/meta-data/', label: 'AWS metadata'},
+      {url: 'https://[::1]/',                        label: 'IPv6 loopback'},
+    ];
+
+    var _orig = window.__bridgeDispatch;
+    window.__bridgeDispatch = function(raw) {
+      var m = JSON.parse(raw);
+      if (m.type === 'HANDSHAKE_ACK') {
+        document.getElementById('bridge-state').textContent = 'Bridge: connected ✓';
+        renderTargets();
+      }
+      if (_orig) _orig(raw);
+    };
+
+    function renderTargets() {
+      var container = document.getElementById('targets');
+      container.innerHTML = '';
+      TARGETS.forEach(function(t, i) {
+        var row = document.createElement('div');
+        row.className = 'target';
+        row.id = 'target-' + i;
+        row.innerHTML = '<span class="url">' + t.url + '</span>' +
+          '<span class="badge badge-pending" id="badge-' + i + '">—</span>';
+        container.appendChild(row);
+      });
+    }
+
+    function setBadge(i, cls, text) {
+      var b = document.getElementById('badge-' + i);
+      if (b) { b.className = 'badge badge-' + cls; b.textContent = text; }
+    }
+
+    function runAll() {
+      var blockedCount = 0;
+      var done = 0;
+
+      TARGETS.forEach(function(t, i) {
+        setBadge(i, 'pending', '⏳');
+        bridge.fetch(t.url, {method: 'GET'})
+          .then(function() {
+            setBadge(i, 'vuln', '🚨 OPEN');
+          })
+          .catch(function(e) {
+            blockedCount++;
+            setBadge(i, 'blocked', '✅ BLOCKED');
+          })
+          .finally(function() {
+            done++;
+            if (done === TARGETS.length) { showSummary(blockedCount); }
+          });
+      });
+    }
+
+    function showSummary(blockedCount) {
+      var el = document.getElementById('summary');
+      el.className = 'show ' + (blockedCount === TARGETS.length ? 'blocked' : 'summary');
+      el.querySelector('h3').textContent =
+        blockedCount === TARGETS.length
+          ? '✅ ALL ' + TARGETS.length + ' TARGETS BLOCKED'
+          : '🚨 ' + (TARGETS.length - blockedCount) + ' TARGETS REACHABLE';
+      el.querySelector('.detail').textContent =
+        'Defense: FetchHandler.validateUrl()\n' +
+        'Checks URL before any network call:\n' +
+        '  1. HTTPS-only check\n' +
+        '  2. Private-IP pattern match (RFC 1918, loopback, link-local, IPv6)\n' +
+        '  3. Domain allowlist check\n\n' +
+        'Error code: FETCH_NOT_ALLOWED\n' +
+        'All ' + blockedCount + '/' + TARGETS.length + ' private targets blocked.';
+    }
+  </script>
+</body>
+</html>

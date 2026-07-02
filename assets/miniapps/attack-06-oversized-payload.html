@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Attack #6 — Oversized Payload</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, sans-serif; padding: 14px; background: #0f0f1a; color: #e0e0e0; margin: 0; }
+    h1 { font-size: 16px; color: #ff6b6b; margin: 0 0 2px; }
+    .num { display: inline-block; background: #ff4444; color: white; font-size: 10px; font-weight: 700;
+      padding: 1px 6px; border-radius: 3px; margin-right: 4px; }
+    .subtitle { font-size: 11px; color: #888; margin: 0 0 12px; }
+    .threat { background: #1a0a0a; border: 1px solid #662222; border-radius: 6px;
+      padding: 10px 12px; font-size: 11px; font-family: monospace; color: #ff9999;
+      margin: 10px 0; white-space: pre; }
+    .size-meter { background: #141424; border-radius: 6px; padding: 10px 12px; margin: 10px 0; }
+    .size-meter label { font-size: 11px; color: #888; display: block; margin-bottom: 6px; }
+    input[type=range] { width: 100%; accent-color: #ff4444; }
+    .size-display { font-size: 15px; font-family: monospace; font-weight: 700; margin-top: 4px; }
+    .size-display.over  { color: #ff4444; }
+    .size-display.under { color: #00cc77; }
+    button { width: 100%; padding: 11px; border-radius: 8px; border: none;
+      background: #cc2222; color: white; font-size: 13px; font-weight: 700;
+      cursor: pointer; margin: 6px 0; }
+    button:active { opacity: 0.8; }
+    .result { border-radius: 8px; padding: 12px 14px; margin: 8px 0; display: none; }
+    .result.show { display: block; }
+    .blocked   { background: #0a1f14; border: 1px solid #00cc77; }
+    .blocked h3 { color: #00cc77; font-size: 13px; margin: 0 0 6px; }
+    .vuln      { background: #200a0a; border: 1px solid #ff3333; }
+    .vuln h3   { color: #ff3333; font-size: 13px; margin: 0 0 6px; }
+    .detail    { font-family: monospace; font-size: 10px; color: #aaa; margin-top: 6px; white-space: pre-wrap; }
+    #bridge-state { font-size: 10px; color: #666; margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+  <h1><span class="num">ATK 6</span> Oversized Payload DoS</h1>
+  <p class="subtitle">Sends a raw message exceeding the 64 KB size limit to force OOM parse or DoS the bridge.</p>
+  <div id="bridge-state">Bridge: connecting…</div>
+
+  <div class="threat">Goal: send huge message → host parses giant JSON → OOM / freeze
+Limit: MAX_RAW_BYTES = 65,536 bytes (checked BEFORE JSON.parse)</div>
+
+  <div class="size-meter">
+    <label>Payload size: <span id="size-label">70 KB</span></label>
+    <input type="range" id="slider" min="10" max="200" value="70" oninput="updateSlider()">
+    <div class="size-display" id="size-display">70,000 B — ABOVE LIMIT ⛔</div>
+  </div>
+
+  <button onclick="runAttack()">⚡ Send Oversized Message</button>
+
+  <div id="res" class="result">
+    <h3>—</h3>
+    <p class="detail">—</p>
+  </div>
+
+  <script>
+    var LIMIT = 65536;
+
+    var _orig = window.__bridgeDispatch;
+    window.__bridgeDispatch = function(raw) {
+      var m = JSON.parse(raw);
+      if (m.type === 'HANDSHAKE_ACK') {
+        document.getElementById('bridge-state').textContent = 'Bridge: connected ✓';
+      }
+      if (_orig) _orig(raw);
+    };
+
+    function updateSlider() {
+      var kb = parseInt(document.getElementById('slider').value, 10);
+      var bytes = kb * 1000;
+      document.getElementById('size-label').textContent = kb + ' KB';
+      var disp = document.getElementById('size-display');
+      if (bytes > LIMIT) {
+        disp.className = 'size-display over';
+        disp.textContent = bytes.toLocaleString() + ' B — ABOVE LIMIT ⛔';
+      } else {
+        disp.className = 'size-display under';
+        disp.textContent = bytes.toLocaleString() + ' B — under limit ✓';
+      }
+    }
+
+    function show(cls, title, detail) {
+      var el = document.getElementById('res');
+      el.className = 'result show ' + cls;
+      el.querySelector('h3').textContent = title;
+      el.querySelector('.detail').textContent = detail;
+    }
+
+    function runAttack() {
+      var kb = parseInt(document.getElementById('slider').value, 10);
+      var targetBytes = kb * 1000;
+      // Build envelope overhead estimate (~180 chars), pad value to hit target
+      var overhead = 180;
+      var padLen = Math.max(0, targetBytes - overhead);
+      var bigValue = 'X'.repeat(padLen);
+
+      var raw = JSON.stringify({
+        type: 'REQUEST',
+        id: 'big-' + Date.now(),
+        sessionToken: window.__WHIP_SESSION_TOKEN__,
+        capability: 'storage.kv', method: 'set',
+        payload: {key: 'x', value: bigValue},
+        version: '1.0', timestamp: Date.now(),
+      });
+
+      var actualBytes = raw.length;
+      var expectedDrop = actualBytes > LIMIT;
+
+      show('blocked', '⏳ Sending ' + (actualBytes / 1000).toFixed(1) + ' KB…',
+        'Actual raw bytes: ' + actualBytes.toLocaleString() + '\nLimit: ' + LIMIT.toLocaleString());
+
+      var msgId = 'big-' + Date.now();
+      var gotResponse = false;
+      var prev = window.__bridgeDispatch;
+      window.__bridgeDispatch = function(raw2) {
+        var m = JSON.parse(raw2);
+        if (m.id === msgId) { gotResponse = true; }
+        if (prev) prev(raw2);
+      };
+
+      window.ReactNativeWebView.postMessage(raw);
+
+      setTimeout(function() {
+        window.__bridgeDispatch = prev;
+        if (expectedDrop) {
+          if (!gotResponse) {
+            show('blocked', '✅ BLOCKED — Message dropped before JSON.parse',
+              'Sent: ' + actualBytes.toLocaleString() + ' bytes\n' +
+              'Limit: ' + LIMIT.toLocaleString() + ' bytes\n\n' +
+              'Defense: BridgeHost.onMessage() checks raw.length BEFORE JSON.parse.\n' +
+              'Cost of this attack: O(1) comparison — bridge not burdened.\n' +
+              'Drop reason: PAYLOAD_TOO_LARGE');
+          } else {
+            show('vuln', '🚨 ATTACK SUCCEEDED — Oversized message parsed!',
+              'Host parsed ' + actualBytes.toLocaleString() + ' bytes despite size limit!');
+          }
+        } else {
+          show('blocked', 'Message was under limit — try increasing the slider',
+            'Sent: ' + actualBytes.toLocaleString() + ' B  Limit: ' + LIMIT.toLocaleString() + ' B');
+        }
+      }, 2000);
+    }
+  </script>
+</body>
+</html>

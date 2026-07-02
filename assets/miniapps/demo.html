@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WhipBridge Demo</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, sans-serif; padding: 16px; background: #f0f4ff; margin: 0; }
+    h2 { font-size: 20px; color: #1a1a2e; margin: 0 0 4px; }
+    .subtitle { font-size: 12px; color: #666; margin: 0 0 14px; }
+    #bridge-status { font-size: 12px; padding: 8px 12px; border-radius: 20px; margin-bottom: 14px;
+      display: inline-flex; align-items: center; gap: 6px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #ccc; flex-shrink: 0; }
+    .connecting { background: #fff3cd; color: #856404; }
+    .connected   { background: #d4edda; color: #155724; }
+    .connected .dot { background: #28a745; }
+    .row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+    button { flex: 1; min-width: 80px; padding: 11px 8px; border-radius: 8px; border: none;
+      background: #4361ee; color: white; font-size: 13px; font-weight: 600; cursor: pointer; }
+    button:active { opacity: 0.75; }
+    button:disabled { background: #bbb; cursor: not-allowed; }
+    #log { margin-top: 10px; }
+    .entry { padding: 8px 12px; border-radius: 6px; margin-bottom: 6px; font-size: 12px; }
+    .ok  { background: #d4edda; color: #155724; }
+    .err { background: #f8d7da; color: #721c24; }
+    .info { background: #e2e8ff; color: #2d3a8c; font-family: monospace; }
+  </style>
+</head>
+<body>
+  <h2>WhipBridge Demo</h2>
+  <p class="subtitle">Happy-path: all three capabilities + push subscription</p>
+
+  <div id="bridge-status" class="connecting">
+    <span class="dot"></span><span id="status-text">Connecting to bridge...</span>
+  </div>
+
+  <div class="row">
+    <button id="btn-storage" onclick="testStorage()" disabled>Storage</button>
+    <button id="btn-haptics" onclick="testHaptics()" disabled>Haptics</button>
+    <button id="btn-fetch"   onclick="testFetch()"   disabled>Fetch</button>
+    <button id="btn-push"    onclick="testPush()"    disabled>Push</button>
+  </div>
+
+  <div id="log"></div>
+
+  <script>
+    var ready = false;
+
+    // ── Bridge readiness ─────────────────────────────────────────────────────
+    var _orig = window.__bridgeDispatch;
+    window.__bridgeDispatch = function(raw) {
+      var m = JSON.parse(raw);
+      if (m.type === 'HANDSHAKE_ACK' && m.ok) {
+        ready = true;
+        document.getElementById('bridge-status').className = 'connected';
+        document.getElementById('status-text').textContent = 'Bridge connected (token verified)';
+        ['btn-storage','btn-haptics','btn-fetch','btn-push'].forEach(function(id) {
+          document.getElementById(id).disabled = false;
+        });
+      }
+      if (_orig) _orig(raw);
+    };
+
+    function log(msg, cls) {
+      var div = document.createElement('div');
+      div.className = 'entry ' + (cls || 'info');
+      div.textContent = msg;
+      document.getElementById('log').prepend(div);
+    }
+
+    // ── Storage ──────────────────────────────────────────────────────────────
+    function testStorage() {
+      bridge.storage.set('greeting', 'hello from mini app!')
+        .then(function() { return bridge.storage.get('greeting'); })
+        .then(function(val) {
+          log('✓ storage.get("greeting") = ' + val, 'ok');
+          return bridge.storage.list();
+        })
+        .then(function(keys) {
+          log('✓ storage.list() = [' + keys.join(', ') + ']', 'ok');
+        })
+        .catch(function(e) { log('✗ Storage: ' + e.message, 'err'); });
+    }
+
+    // ── Haptics ──────────────────────────────────────────────────────────────
+    function testHaptics() {
+      bridge.haptics.impactMedium()
+        .then(function() { log('✓ haptics.impactMedium() fired', 'ok'); })
+        .catch(function(e) { log('✗ Haptics: ' + e.message, 'err'); });
+    }
+
+    // ── Fetch ────────────────────────────────────────────────────────────────
+    function testFetch() {
+      log('⏳ Fetching https://httpbin.org/get …', 'info');
+      bridge.fetch('https://httpbin.org/get', {method: 'GET'})
+        .then(function(res) {
+          var body = JSON.parse(res.body);
+          log('✓ fetch OK — status=' + res.status + '  url=' + body.url, 'ok');
+        })
+        .catch(function(e) { log('✗ Fetch: ' + e.message, 'err'); });
+    }
+
+    // ── Push subscription ────────────────────────────────────────────────────
+    function testPush() {
+      bridge.subscribe('demo.ticker', function(payload) {
+        log('📩 PUSH received on demo.ticker: ' + JSON.stringify(payload), 'ok');
+      });
+      log('✓ Subscribed to channel demo.ticker — waiting for host push…', 'info');
+    }
+  </script>
+</body>
+</html>

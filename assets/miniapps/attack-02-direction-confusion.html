@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Attack #2 — Direction Confusion</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, sans-serif; padding: 14px; background: #0f0f1a; color: #e0e0e0; margin: 0; }
+    h1 { font-size: 16px; color: #ff6b6b; margin: 0 0 2px; }
+    .num { display: inline-block; background: #ff4444; color: white; font-size: 10px; font-weight: 700;
+      padding: 1px 6px; border-radius: 3px; margin-right: 4px; }
+    .subtitle { font-size: 11px; color: #888; margin: 0 0 12px; }
+    .threat { background: #1a0a0a; border: 1px solid #662222; border-radius: 6px;
+      padding: 10px 12px; font-size: 11px; font-family: monospace; color: #ff9999;
+      margin: 10px 0; white-space: pre; }
+    button { width: 100%; padding: 13px; border-radius: 8px; border: none;
+      background: #cc2222; color: white; font-size: 14px; font-weight: 700;
+      cursor: pointer; margin: 6px 0; letter-spacing: 0.3px; }
+    button:active { opacity: 0.8; }
+    .result { border-radius: 8px; padding: 12px 14px; margin: 8px 0; display: none; }
+    .result.show { display: block; }
+    .blocked   { background: #0a1f14; border: 1px solid #00cc77; }
+    .blocked h3 { color: #00cc77; font-size: 13px; margin: 0 0 6px; }
+    .vuln      { background: #200a0a; border: 1px solid #ff3333; }
+    .vuln h3   { color: #ff3333; font-size: 13px; margin: 0 0 6px; }
+    .detail    { font-family: monospace; font-size: 10px; color: #aaa; margin-top: 6px; white-space: pre-wrap; }
+    #bridge-state { font-size: 10px; color: #666; margin-bottom: 10px; }
+    .scenario { font-size: 11px; color: #bbb; background: #151525; border-radius: 6px;
+      padding: 8px 10px; margin: 8px 0; border-left: 2px solid #4466cc; }
+  </style>
+</head>
+<body>
+  <h1><span class="num">ATK 2</span> Direction Confusion</h1>
+  <p class="subtitle">Guest sends a HOST_ONLY PUSH message to inject data into a shared pub/sub channel.</p>
+  <div id="bridge-state">Bridge: connecting…</div>
+
+  <div class="scenario">
+    Scenario: App A and App B both subscribe to "market.prices". App A (compromised)
+    sends a PUSH directly, bypassing the host, to make App B display price=0.
+  </div>
+
+  <div class="threat">Message sent (HOST_ONLY type from guest):
+{
+  "type": "PUSH",          ← host-only direction
+  "channel": "market.prices",
+  "payload": { "price": 0, "source": "attacker" }
+}</div>
+
+  <button onclick="runAttack()">⚡ Inject Fake PUSH</button>
+
+  <div id="res" class="result">
+    <h3>—</h3>
+    <p class="detail">—</p>
+  </div>
+
+  <script>
+    var _orig = window.__bridgeDispatch;
+    window.__bridgeDispatch = function(raw) {
+      var m = JSON.parse(raw);
+      if (m.type === 'HANDSHAKE_ACK') {
+        document.getElementById('bridge-state').textContent = 'Bridge: connected ✓';
+      }
+      if (_orig) _orig(raw);
+    };
+
+    function show(cls, title, detail) {
+      var el = document.getElementById('res');
+      el.className = 'result show ' + cls;
+      el.querySelector('h3').textContent = title;
+      el.querySelector('.detail').textContent = detail;
+    }
+
+    function runAttack() {
+      show('blocked', '⏳ Sending HOST_ONLY PUSH from guest…', 'Waiting 2 s for host response…');
+
+      var msgId = 'evil-push-' + Date.now();
+      var gotResponse = false;
+
+      var prev = window.__bridgeDispatch;
+      window.__bridgeDispatch = function(raw) {
+        var m = JSON.parse(raw);
+        if (m.id === msgId) { gotResponse = true; }
+        if (prev) prev(raw);
+      };
+
+      // PUSH is a HOST_ONLY type — direction check fires BEFORE token validation
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'PUSH',
+        id: msgId,
+        sessionToken: window.__WHIP_SESSION_TOKEN__,
+        channel: 'market.prices',
+        payload: {price: 0, source: 'attacker-app'},
+        version: '1.0',
+        timestamp: Date.now(),
+      }));
+
+      setTimeout(function() {
+        window.__bridgeDispatch = prev;
+        if (gotResponse) {
+          show('vuln', '🚨 ATTACK SUCCEEDED — Bridge is VULNERABLE',
+            'Host responded to a PUSH sent by the guest.\nOther subscribers may have received attacker data!');
+        } else {
+          show('blocked', '✅ BLOCKED — Silent drop (DIRECTION_VIOLATION)',
+            'Host dropped the message before token check.\n\n' +
+            'Defense: GUEST_ALLOWED_TYPES set in BridgeHost.onMessage()\n' +
+            'PUSH, RESPONSE, HANDSHAKE_ACK are HOST-only types.\n' +
+            'Silent drop gives attacker no timing oracle.\n\n' +
+            'Guest sent: { type: "PUSH" }\n' +
+            'Host action: drop() → reason="DIRECTION_VIOLATION"');
+        }
+      }, 2000);
+    }
+  </script>
+</body>
+</html>
