@@ -32,21 +32,23 @@
 </head>
 <body>
   <h1><span class="num">ATK 5</span> Capability Gate Bypass</h1>
-  <p class="subtitle">Mini app manifest grants only storage.kv — tries to use network.fetch and a fabricated capability.</p>
+  <p class="subtitle">Mini app manifest grants only storage.kv — tries to use network.fetch, a fabricated capability, and ungated subscribe.</p>
   <div id="bridge-state">Bridge: connecting…</div>
 
   <div class="manifest-box">This app's manifest (host-enforced):
 {
-  "capabilities": ["storage.kv"],   ← no network.fetch!
+  "capabilities": ["storage.kv"],   ← no network.fetch, no push.subscribe!
   "domainAllowlist": []
 }</div>
 
   <div class="threat">Attempts:
-  1. bridge.fetch(https://httpbin.org/get)  → needs "network.fetch"
-  2. REQUEST { capability: "admin.reset" }  → not a real capability at all</div>
+  1. bridge.fetch(https://httpbin.org/get)    → needs "network.fetch"
+  2. REQUEST { capability: "admin.reset" }    → not a real capability at all
+  3. SUBSCRIBE { channel: "market.prices" }   → needs "push.subscribe"</div>
 
   <button onclick="tryFetch()">⚡ Try bridge.fetch (network.fetch capability)</button>
   <button onclick="tryFake()"  style="background:#883300;">⚡ Try admin.reset (fabricated capability)</button>
+  <button onclick="trySub()"   style="background:#5c3a00;">⚡ Try subscribe (push.subscribe capability)</button>
 
   <div id="res" class="result">
     <h3>—</h3>
@@ -116,6 +118,41 @@
         sessionToken: window.__WHIP_SESSION_TOKEN__,
         capability: 'admin.reset', method: 'execute',
         payload: {}, version: '1.0', timestamp: Date.now(),
+      }));
+    }
+
+    function trySub() {
+      show('blocked', '⏳ Sending SUBSCRIBE without push.subscribe capability…', '');
+      var msgId = 'sub-cap-' + Date.now();
+
+      var prev = window.__bridgeDispatch;
+      window.__bridgeDispatch = function(raw) {
+        var m = JSON.parse(raw);
+        if (m.id === msgId) {
+          window.__bridgeDispatch = prev;
+          if (m.ok === false) {
+            show('blocked', '✅ BLOCKED — CAPABILITY_DENIED (push.subscribe not in manifest)',
+              'Attempted: SUBSCRIBE channel = "market.prices"\n' +
+              'Error code: ' + (m.error && m.error.code) + '\n\n' +
+              'Without push.subscribe capability, the app cannot:\n' +
+              '  · Enroll in host push channels\n' +
+              '  · Receive host-initiated data streams\n\n' +
+              'Defense: manifest.capabilities.includes("push.subscribe") === false\n' +
+              'Host returns CAPABILITY_DENIED before adding token to subscription map.\n' +
+              'Info leak prevented: no channel list exposed in error response.');
+          } else {
+            show('vuln', '🚨 ATTACK SUCCEEDED — Subscription accepted without capability',
+              'App is now enrolled in market.prices push channel!');
+          }
+        }
+        if (prev) prev(raw);
+      };
+
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'SUBSCRIBE', id: msgId,
+        sessionToken: window.__WHIP_SESSION_TOKEN__,
+        version: '1.0', channel: 'market.prices',
+        timestamp: Date.now(),
       }));
     }
   </script>

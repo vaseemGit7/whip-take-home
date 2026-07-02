@@ -11,7 +11,7 @@ export interface MiniApp {
 
 const DEMO_MANIFEST: MiniAppManifest = {
   miniAppId: 'demo',
-  capabilities: ['storage.kv', 'device.haptics', 'network.fetch'],
+  capabilities: ['storage.kv', 'device.haptics', 'network.fetch', 'push.subscribe'],
   domainAllowlist: ['httpbin.org', 'jsonplaceholder.typicode.com'],
   storageQuotaBytes: 1_048_576,
 };
@@ -373,14 +373,17 @@ const ATK5_HTML = `<!DOCTYPE html>
 </head>
 <body>
   <h1><span class="num">ATK 5</span> Capability Gate Bypass</h1>
-  <p class="sub">Manifest grants only storage.kv — tries to use network.fetch and a fabricated capability.</p>
+  <p class="sub">Manifest grants only storage.kv — tries network.fetch, fabricated cap, and ungated subscribe.</p>
   <div id="bs">Bridge: connecting…</div>
   <div class="manifest">This app's manifest (host-enforced):
-{ "capabilities": ["storage.kv"] }   ← no network.fetch!</div>
+{ "capabilities": ["storage.kv"] }
+← no network.fetch, no push.subscribe!</div>
   <div class="threat">Attempt 1: bridge.fetch(https://httpbin.org/get) — needs "network.fetch"
-Attempt 2: REQUEST { capability: "admin.reset" } — fabricated</div>
-  <button class="btn-red" onclick="tryFetch()">⚡ Try bridge.fetch (network.fetch cap)</button>
-  <button class="btn-org" onclick="tryFake()">⚡ Try admin.reset (fabricated cap)</button>
+Attempt 2: REQUEST { capability: "admin.reset" } — fabricated
+Attempt 3: SUBSCRIBE { channel: "market.prices" } — needs "push.subscribe"</div>
+  <button class="btn-red" onclick="tryFetch()">⚡ Try bridge.fetch (network.fetch)</button>
+  <button class="btn-org" onclick="tryFake()" style="background:#883300;">⚡ Try admin.reset (fabricated)</button>
+  <button class="btn-org" onclick="trySub()" style="background:#5c3a00;">⚡ Try subscribe (push.subscribe)</button>
   <div id="res" class="result"><h3>—</h3><p class="detail">—</p></div>
   <script>
     var _o=window.__bridgeDispatch;
@@ -397,6 +400,12 @@ Attempt 2: REQUEST { capability: "admin.reset" } — fabricated</div>
       var id='fake-'+Date.now(),prev=window.__bridgeDispatch;
       window.__bridgeDispatch=function(raw){var m=JSON.parse(raw);if(m.id===id){window.__bridgeDispatch=prev;if(m.ok){show('vuln','🚨 admin.reset executed!','');}else{show('blocked','✅ BLOCKED — CAPABILITY_DENIED','Attempted: capability="admin.reset"\\nError: '+(m.error&&m.error.code)+'\\n\\nFabricated caps blocked at two layers:\\n  1. Not in this app\\'s manifest\\n  2. No handler in CapabilityRouter');}}if(prev)prev(raw);};
       window.ReactNativeWebView.postMessage(JSON.stringify({type:'REQUEST',id:id,sessionToken:window.__WHIP_SESSION_TOKEN__,capability:'admin.reset',method:'execute',payload:{},version:'1.0',timestamp:Date.now()}));
+    }
+    function trySub(){
+      show('blocked','⏳ Sending SUBSCRIBE without push.subscribe cap…','');
+      var id='sub-'+Date.now(),prev=window.__bridgeDispatch;
+      window.__bridgeDispatch=function(raw){var m=JSON.parse(raw);if(m.id===id){window.__bridgeDispatch=prev;if(m.ok===false){show('blocked','✅ BLOCKED — CAPABILITY_DENIED (push.subscribe not in manifest)','Attempted: SUBSCRIBE channel="market.prices"\\nError: '+(m.error&&m.error.code)+'\\n\\nWithout push.subscribe cap, app cannot:\\n  · enroll in host push channels\\n  · receive host-initiated data streams\\n\\nDefense: manifest.capabilities.includes("push.subscribe")===false\\nHost returns CAPABILITY_DENIED before adding token to subscription map.');}else{show('vuln','🚨 ATTACK SUCCEEDED — Subscription accepted without capability','App is now enrolled in market.prices channel!');}}if(prev)prev(raw);};
+      window.ReactNativeWebView.postMessage(JSON.stringify({type:'SUBSCRIBE',id:id,sessionToken:window.__WHIP_SESSION_TOKEN__,version:'1.0',channel:'market.prices',timestamp:Date.now()}));
     }
   </script>
 </body></html>`;

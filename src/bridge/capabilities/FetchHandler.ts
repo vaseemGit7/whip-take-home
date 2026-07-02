@@ -31,6 +31,10 @@ function validateUrl(rawUrl: string, allowlist: string[]): void {
     throw new BridgeError(ErrorCode.FETCH_NOT_ALLOWED, 'only HTTPS is permitted');
   }
 
+  if (parsed.username || parsed.password) {
+    throw new BridgeError(ErrorCode.FETCH_NOT_ALLOWED, 'credentials in URL are not permitted');
+  }
+
   // WHATWG URL standard wraps IPv6 addresses in brackets in .hostname, e.g. "[::1]".
   // Strip the brackets before the private-IP pattern check.
   const rawHost = parsed.hostname.toLowerCase();
@@ -92,9 +96,24 @@ export const FetchHandler: CapabilityHandler = {
             method: upperMethod,
             headers,
             body: body != null ? body : undefined,
+            redirect: 'manual',
           });
         } catch (err) {
           throw new BridgeError(ErrorCode.FETCH_FAILED, String(err));
+        }
+
+        // Surface 3xx to the guest rather than following redirects.
+        // The guest can call bridge.fetch() again with the Location URL,
+        // which re-runs validateUrl() on the redirect target — preventing
+        // redirect-based allowlist bypass (e.g., allowlisted host redirects
+        // to a private IP or off-allowlist domain).
+        if (response.status >= 300 && response.status < 400) {
+          const location = response.headers.get('location') ?? '';
+          return {
+            status: response.status,
+            headers: {'location': location},
+            body: '',
+          };
         }
 
         // Check declared size before downloading body

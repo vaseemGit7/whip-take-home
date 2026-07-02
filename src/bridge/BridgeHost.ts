@@ -31,6 +31,7 @@ interface TokenEntry {
   miniAppId: string;
   manifest: MiniAppManifest;
   webViewRef: RefObject<WebView | null>;
+  handshakeDone: boolean;
 }
 
 function generateToken(): string {
@@ -141,7 +142,7 @@ export class BridgeHost {
     manifest: MiniAppManifest,
   ): {token: string; injectedScript: string} {
     const token = generateToken();
-    this.tokenRegistry.set(token, {miniAppId, manifest, webViewRef});
+    this.tokenRegistry.set(token, {miniAppId, manifest, webViewRef, handshakeDone: false});
     this.rateLimiters.set(
       token,
       new RateLimiter(() => {
@@ -273,6 +274,12 @@ export class BridgeHost {
     const type = msg.type as string;
 
     if (type === 'HANDSHAKE') {
+      const entry = this.tokenRegistry.get(sessionToken);
+      if (!entry || entry.handshakeDone) {
+        this.drop('DUPLICATE_HANDSHAKE');
+        return;
+      }
+      entry.handshakeDone = true;
       const ack: BridgeHandshakeAck = {
         type: 'HANDSHAKE_ACK',
         id: (msg.id as string) || generateId(),
@@ -287,6 +294,17 @@ export class BridgeHost {
 
     if (type === 'SUBSCRIBE') {
       const sub = msg as unknown as BridgeSubscribe;
+      if (!manifest.capabilities.includes('push.subscribe')) {
+        this.respond(webViewRef, {
+          type: 'RESPONSE',
+          id: sub.id || generateId(),
+          version: CURRENT_VERSION,
+          ok: false,
+          error: {code: ErrorCode.CAPABILITY_DENIED, message: ErrorCode.CAPABILITY_DENIED},
+          timestamp: Date.now(),
+        });
+        return;
+      }
       if (sub.channel) {
         if (!this.pushSubscriptions.has(sub.channel)) {
           this.pushSubscriptions.set(sub.channel, new Set());
@@ -298,7 +316,7 @@ export class BridgeHost {
 
     if (type === 'UNSUBSCRIBE') {
       const unsub = msg as unknown as BridgeUnsubscribe;
-      if (unsub.channel) {
+      if (manifest.capabilities.includes('push.subscribe') && unsub.channel) {
         this.pushSubscriptions.get(unsub.channel)?.delete(sessionToken);
       }
       return;

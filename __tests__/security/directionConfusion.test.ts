@@ -200,6 +200,120 @@ describe('Direction check precedes token validation', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SUBSCRIBE capability gate — push.subscribe required
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('SUBSCRIBE capability gate', () => {
+  const SUBSCRIBE_MANIFEST = {
+    ...DEMO_MANIFEST,
+    capabilities: ['push.subscribe'],
+  };
+
+  it('accepts SUBSCRIBE when push.subscribe is in manifest and enrolls token', async () => {
+    const {host} = makeHost();
+    const {ref, injected} = makeWebViewRef();
+    const {token} = host.registerWebView(ref, 'subscriber', SUBSCRIBE_MANIFEST);
+
+    host.onMessage(makeEvent({
+      type: 'SUBSCRIBE', id: 'sub-1', sessionToken: token,
+      version: '1.0', channel: 'market.prices', timestamp: Date.now(),
+    }));
+
+    await new Promise<void>(resolve => setTimeout(resolve, 10));
+
+    // Host push should now reach this subscriber
+    host.push('market.prices', {price: 99});
+    await new Promise<void>(resolve => setTimeout(resolve, 10));
+
+    expect(injected.some(c => c.includes('market.prices'))).toBe(true);
+  });
+
+  it('sends CAPABILITY_DENIED RESPONSE when push.subscribe is absent', async () => {
+    const {host} = makeHost();
+    const {ref, injected} = makeWebViewRef();
+    // storage.kv only — no push.subscribe
+    const {token} = host.registerWebView(ref, 'attacker', {
+      ...DEMO_MANIFEST, capabilities: ['storage.kv'],
+    });
+
+    const subId = 'sub-denied-1';
+    host.onMessage(makeEvent({
+      type: 'SUBSCRIBE', id: subId, sessionToken: token,
+      version: '1.0', channel: 'market.prices', timestamp: Date.now(),
+    }));
+
+    await new Promise<void>(resolve => setTimeout(resolve, 10));
+
+    const denial = injected.find(c => c.includes('CAPABILITY_DENIED'));
+    expect(denial).toBeTruthy();
+  });
+
+  it('does NOT deliver host pushes to app that was denied subscribe', async () => {
+    const {host} = makeHost();
+    const {ref, injected} = makeWebViewRef();
+    const {token} = host.registerWebView(ref, 'attacker', {
+      ...DEMO_MANIFEST, capabilities: ['storage.kv'],
+    });
+
+    host.onMessage(makeEvent({
+      type: 'SUBSCRIBE', id: 'sub-x', sessionToken: token,
+      version: '1.0', channel: 'market.prices', timestamp: Date.now(),
+    }));
+
+    await new Promise<void>(resolve => setTimeout(resolve, 10));
+    injected.length = 0; // clear the CAPABILITY_DENIED response
+
+    host.push('market.prices', {price: 0});
+    await new Promise<void>(resolve => setTimeout(resolve, 10));
+
+    // No PUSH should have been delivered — token was never enrolled
+    expect(injected.some(c => c.includes('PUSH'))).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HANDSHAKE once-per-session enforcement
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('HANDSHAKE once-per-session', () => {
+  it('accepts the first HANDSHAKE and responds with HANDSHAKE_ACK', async () => {
+    const {host} = makeHost();
+    const {ref, injected} = makeWebViewRef();
+    const {token} = host.registerWebView(ref, 'app', DEMO_MANIFEST);
+
+    host.onMessage(makeEvent({
+      type: 'HANDSHAKE', id: 'h1', sessionToken: token,
+      version: '1.0', timestamp: Date.now(),
+    }));
+
+    await new Promise<void>(resolve => setTimeout(resolve, 10));
+    expect(injected.some(c => c.includes('HANDSHAKE_ACK'))).toBe(true);
+  });
+
+  it('drops a second HANDSHAKE with DUPLICATE_HANDSHAKE and sends no ACK', async () => {
+    const {host, dropped} = makeHost();
+    const {ref, injected} = makeWebViewRef();
+    const {token} = host.registerWebView(ref, 'app', DEMO_MANIFEST);
+
+    host.onMessage(makeEvent({
+      type: 'HANDSHAKE', id: 'h1', sessionToken: token,
+      version: '1.0', timestamp: Date.now(),
+    }));
+    await new Promise<void>(resolve => setTimeout(resolve, 10));
+    injected.length = 0; // clear first ACK
+
+    host.onMessage(makeEvent({
+      type: 'HANDSHAKE', id: 'h2', sessionToken: token,
+      version: '1.0', timestamp: Date.now(),
+    }));
+    await new Promise<void>(resolve => setTimeout(resolve, 10));
+
+    expect(dropped).toContain('DUPLICATE_HANDSHAKE');
+    expect(injected).toHaveLength(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // End-to-end cross-app PUSH injection scenario
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -210,7 +324,7 @@ describe('Cross-app PUSH injection scenario', () => {
     const {ref: attackerRef} = makeWebViewRef();
 
     const {token: victimToken} = host.registerWebView(victimRef, 'victim', {
-      ...DEMO_MANIFEST, miniAppId: 'victim',
+      ...DEMO_MANIFEST, miniAppId: 'victim', capabilities: ['push.subscribe'],
     });
     const {token: attackerToken} = host.registerWebView(attackerRef, 'attacker', {
       ...DEMO_MANIFEST, miniAppId: 'attacker',
@@ -248,7 +362,7 @@ describe('Cross-app PUSH injection scenario', () => {
     const {ref: victimRef, injected: victimInjected} = makeWebViewRef();
 
     const {token: victimToken} = host.registerWebView(victimRef, 'victim', {
-      ...DEMO_MANIFEST, miniAppId: 'victim',
+      ...DEMO_MANIFEST, miniAppId: 'victim', capabilities: ['push.subscribe'],
     });
 
     host.onMessage(makeEvent({

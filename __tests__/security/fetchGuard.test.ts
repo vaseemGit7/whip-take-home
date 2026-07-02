@@ -79,6 +79,32 @@ describe('FetchHandler — HTTPS enforcement', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Credentials-in-URL
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('FetchHandler — credentials in URL', () => {
+  it('rejects URL with username (allowlist bypass attempt)', async () => {
+    // https://evil.com@httpbin.org/ — hostname=httpbin.org passes allowlist,
+    // but username field carries evil.com. Reject before allowlist check.
+    await expect(
+      execute(ctx(['httpbin.org']), {url: 'https://evil.com@httpbin.org/get'}),
+    ).rejects.toMatchObject({code: 'FETCH_NOT_ALLOWED'});
+  });
+
+  it('rejects URL with password', async () => {
+    await expect(
+      execute(ctx(['httpbin.org']), {url: 'https://user:pass@httpbin.org/get'}),
+    ).rejects.toMatchObject({code: 'FETCH_NOT_ALLOWED'});
+  });
+
+  it('rejects URL with username only (colon form)', async () => {
+    await expect(
+      execute(ctx(['httpbin.org']), {url: 'https://user:@httpbin.org/get'}),
+    ).rejects.toMatchObject({code: 'FETCH_NOT_ALLOWED'});
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Domain allowlist
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -170,6 +196,65 @@ describe('FetchHandler — dangerous header rejection', () => {
       ).rejects.toMatchObject({code: 'INVALID_PAYLOAD'});
     });
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Redirect handling — 3xx surfaced to guest, never followed internally
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('FetchHandler — redirect bypass prevention', () => {
+  it('returns 302 status and Location to guest without following the redirect', async () => {
+    const mockResponse = {
+      status: 302,
+      headers: {
+        get: (name: string) => name === 'location' ? 'https://evil.com/data' : null,
+        forEach: (_: any) => {},
+      },
+      text: async () => '',
+    };
+    global.fetch = jest.fn().mockResolvedValueOnce(mockResponse) as any;
+
+    const result = await execute(ctx(['httpbin.org']), {
+      url: 'https://httpbin.org/redirect-to',
+      method: 'GET',
+    });
+
+    // Returns 3xx to caller — does NOT follow or return evil.com body
+    expect(result).toMatchObject({status: 302});
+    expect((result as any).headers.location).toBe('https://evil.com/data');
+    // Only one fetch call — no follow-through
+    expect((global.fetch as jest.Mock).mock.calls).toHaveLength(1);
+  });
+
+  it('returns 301 with Location so guest can re-validate before following', async () => {
+    const mockResponse = {
+      status: 301,
+      headers: {
+        get: (name: string) => name === 'location' ? 'https://other-allowed.com/new' : null,
+        forEach: (_: any) => {},
+      },
+      text: async () => '',
+    };
+    global.fetch = jest.fn().mockResolvedValueOnce(mockResponse) as any;
+
+    const result = await execute(ctx(['example.com']), {url: 'https://example.com/moved'});
+    expect(result).toMatchObject({status: 301});
+  });
+
+  it('native fetch is called with redirect: manual', async () => {
+    const mockResponse = {
+      status: 200,
+      headers: {get: () => null, forEach: (_: any) => {}},
+      text: async () => '{}',
+    };
+    global.fetch = jest.fn().mockResolvedValueOnce(mockResponse) as any;
+
+    await execute(ctx(['example.com']), {url: 'https://example.com/data'});
+
+    expect((global.fetch as jest.Mock).mock.calls[0][1]).toMatchObject({
+      redirect: 'manual',
+    });
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
