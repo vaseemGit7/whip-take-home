@@ -1,4 +1,4 @@
-import React, {useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useState} from 'react';
 import {
   SafeAreaView,
   ScrollView,
@@ -38,6 +38,21 @@ function App() {
       NativeWhipMetrics?.recordDropped(reason);
     };
     return host;
+  }, []);
+
+  // JSI smoke-test: verify global.__whipStorage was installed by WhipJSIInstaller.
+  // This runs in the Hermes runtime (RN JS thread) — NOT in a WebView context.
+  // WebView JS contexts are isolated from Hermes by design (the security model).
+  // The synchronous return proves no async hop or event-loop yield occurred.
+  useEffect(() => {
+    const storage = (global as any).__whipStorage;
+    if (storage) {
+      const val: string | null = storage.getSync('__whip_jsi_demo__');
+      console.log('[WhipBridge JSI] getSync result:', val);
+      // Expected: "[WhipBridge JSI] getSync result: jsi-is-synchronous"
+    } else {
+      console.warn('[WhipBridge JSI] __whipStorage not installed');
+    }
   }, []);
 
   const app = MINI_APPS[selected];
