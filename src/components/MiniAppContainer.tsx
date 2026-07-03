@@ -1,4 +1,4 @@
-import React, {useCallback, useEffect, useRef} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {StyleSheet, View} from 'react-native';
 import WebView, {WebViewMessageEvent} from 'react-native-webview';
 import {BridgeHost} from '../bridge/BridgeHost';
@@ -15,6 +15,9 @@ interface Props {
 
 export function MiniAppContainer({bridgeHost, manifest, html, uri}: Props) {
   const webViewRef = useRef<WebView | null>(null);
+  // Incrementing this key forces <WebView> to fully unmount and remount,
+  // picking up the new injectedJavaScriptBeforeContentLoaded after a crash.
+  const [crashKey, setCrashKey] = useState(0);
 
   // Register this WebView with the bridge before first render.
   // We use a ref so the token is stable across re-renders.
@@ -27,11 +30,9 @@ export function MiniAppContainer({bridgeHost, manifest, html, uri}: Props) {
     );
   }
 
-  const {token, injectedScript} = sessionRef.current;
-
   useEffect(() => {
     // Re-register if Strict Mode double-mount removed our token
-    if (!bridgeHost.hasToken(token)) {
+    if (!bridgeHost.hasToken(sessionRef.current?.token ?? '')) {
       sessionRef.current = bridgeHost.registerWebView(
         webViewRef,
         manifest.miniAppId,
@@ -39,8 +40,12 @@ export function MiniAppContainer({bridgeHost, manifest, html, uri}: Props) {
       );
     }
     return () => {
-      bridgeHost.cleanup(token);
-      sessionRef.current = null;
+      // Read token from ref at cleanup time so a post-crash re-registration
+      // is also cleaned up correctly (not just the token captured at mount).
+      if (sessionRef.current) {
+        bridgeHost.cleanup(sessionRef.current.token);
+        sessionRef.current = null;
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bridgeHost, manifest.miniAppId]);
@@ -52,35 +57,37 @@ export function MiniAppContainer({bridgeHost, manifest, html, uri}: Props) {
     [bridgeHost],
   );
 
-  // iOS: WebContent process crashed
-  const onContentProcessDidTerminate = useCallback(() => {
+  // Shared crash handler for iOS (onContentProcessDidTerminate) and
+  // Android (onRenderProcessGone). Cleans up the stale session, issues a
+  // fresh token, then forces the WebView to remount so the new token is
+  // delivered via injectedJavaScriptBeforeContentLoaded — avoiding the
+  // "connecting forever" state caused by the old approach of reload() with
+  // an already-invalidated token.
+  const handleCrash = useCallback(() => {
     if (sessionRef.current) {
       bridgeHost.cleanup(sessionRef.current.token);
-      sessionRef.current = null;
     }
-    webViewRef.current?.reload();
-  }, [bridgeHost]);
-
-  // Android: renderer process crashed
-  const onRenderProcessGone = useCallback(() => {
-    if (sessionRef.current) {
-      bridgeHost.cleanup(sessionRef.current.token);
-      sessionRef.current = null;
-    }
-    webViewRef.current?.reload();
-  }, [bridgeHost]);
+    sessionRef.current = bridgeHost.registerWebView(
+      webViewRef,
+      manifest.miniAppId,
+      manifest,
+    );
+    setCrashKey(k => k + 1);
+  }, [bridgeHost, manifest]);
 
   const source = uri ? {uri} : {html: html ?? '<html><body></body></html>'};
+  const {injectedScript} = sessionRef.current;
 
   return (
     <View style={styles.container}>
       <WebView
+        key={crashKey}
         ref={webViewRef}
         source={source}
         onMessage={onMessage}
         injectedJavaScriptBeforeContentLoaded={injectedScript}
-        onContentProcessDidTerminate={onContentProcessDidTerminate}
-        onRenderProcessGone={onRenderProcessGone}
+        onContentProcessDidTerminate={handleCrash}
+        onRenderProcessGone={handleCrash}
         javaScriptEnabled
         domStorageEnabled={false}
         allowsInlineMediaPlayback={false}
