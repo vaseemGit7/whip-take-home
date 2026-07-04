@@ -2262,8 +2262,8 @@ SPEC CHECKSUMS:
   ReactCodegen: c7a39d12bd32e7ac00d7ded981384b0f2fc7dc2f
   ReactCommon: 4d01bfb533b93a2103329dfefc74db6a9e272888
   ReactNativeDependencies: fa0a54b3f5319ae0e3b9aff32bfee7a424b88e66
-  WhipJSI: fabf0eae1cf2b20fb5424e4f953c1ed3ae5c18f1
-  Yoga: fe50ab299e578f397fef753cf309c6703a4db29b
+  WhipJSI: d4fe1a8171234f55a235bd97d04bc1270029293a
+  Yoga: 94172d87dd5d83fc929bf1ee53121b5d4490b5f2
 
 PODFILE CHECKSUM: 272948cebcc312b69d4fccacc82959cba029be45
 
