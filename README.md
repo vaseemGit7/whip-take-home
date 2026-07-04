@@ -6,7 +6,7 @@ A React Native host application that loads untrusted mini apps inside sandboxed 
 
 ---
 
-## What I want you to look at
+## Where to start
 
 1. **The message-validation pipeline** (`BridgeHost.ts:171`) — 7 sequential checks before any message reaches a handler: size → parse → direction → token → rate-limit → capability → sanitize. Direction enforcement is first and silent, so a malicious guest learns nothing from rejection.
 
@@ -143,7 +143,7 @@ export const GUEST_ALLOWED_TYPES = new Set([
 
 **Impact contrast.** In a single-tenant embedded WebView — a browser tab, a documentation viewer, a one-off hybrid app — a guest spoofing its own PUSH message type is a self-attack. The guest is fooling itself. In Whip's multi-tenant model, the same attack becomes cross-tenant data injection: one malicious mini app can inject attacker-controlled payloads into every other subscribing mini app on the device. One bad install affects the entire subscription ecosystem on that user's device.
 
-A useful test: can you name architectures where the attack matters less? For direction abuse — yes. Single-tenant WebView systems: self-attack only, no cross-app path. Point-to-point IPC without subscription channels: no fanout target. Systems where mini apps don't share push channels: the attack surface doesn't exist. Naming those weaker cases is what makes this Whip-specific rather than generic protocol hardening.
+A useful test: the attack should matter less in architectures that lack Whip's properties. For direction abuse — yes. Single-tenant WebView systems: self-attack only, no cross-app path. Point-to-point IPC without subscription channels: no fanout target. Systems where mini apps don't share push channels: the attack surface doesn't exist. Naming those weaker cases is what makes this Whip-specific rather than generic protocol hardening.
 
 ---
 
