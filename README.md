@@ -18,14 +18,14 @@ A React Native host application that loads untrusted mini apps inside sandboxed 
 
 ## Setup
 
-| Tool | Version |
-|---|---|
-| Node.js | ≥ 18 |
-| npm | ≥ 9 |
-| Ruby | ≥ 2.6.10 |
-| CocoaPods | ≥ 1.13 (installed via Bundler) |
-| Xcode | ≥ 15 (iOS) |
-| Android Studio + SDK | compileSdk 36, minSdk 24 |
+| Tool                 | Version                        |
+| -------------------- | ------------------------------ |
+| Node.js              | ≥ 18                           |
+| npm                  | ≥ 9                            |
+| Ruby                 | ≥ 2.6.10                       |
+| CocoaPods            | ≥ 1.13 (installed via Bundler) |
+| Xcode                | ≥ 15 (iOS)                     |
+| Android Studio + SDK | compileSdk 36, minSdk 24       |
 
 ```sh
 git clone <repo-url> && cd WhipBridge
@@ -40,6 +40,7 @@ npm run android   # Android emulator or device
 ```
 
 To target a physical device:
+
 ```sh
 npx react-native run-ios --device "iPhone Name"
 npx react-native run-android --deviceId <adb-device-id>
@@ -90,19 +91,23 @@ npm test    # 69 passing; App.test.tsx fails (missing RNCWebViewModule mock — 
 **Scenario:** App A is compromised. App B subscribes to `market.prices`. App A sends a `PUSH` message with `{price: 0}` directly to the bridge, hoping to inject attacker-controlled data into App B's subscription handler.
 
 **Attack** (from [`__tests__/security/directionConfusion.test.ts:103`](__tests__/security/directionConfusion.test.ts#L103)):
+
 ```typescript
 // Attacker's WebView sends a host-only message type
-host.onMessage(makeEvent({
-  type: 'PUSH',                     // only the host is allowed to send this
-  sessionToken: attackerToken,      // valid token — attacker is a registered app
-  channel: 'market.prices',
-  payload: {price: 0},
-}));
+host.onMessage(
+  makeEvent({
+    type: 'PUSH', // only the host is allowed to send this
+    sessionToken: attackerToken, // valid token — attacker is a registered app
+    channel: 'market.prices',
+    payload: { price: 0 },
+  }),
+);
 // Result: victim's WebView receives nothing
 expect(victimInjected).toHaveLength(0);
 ```
 
 **Defense** ([`src/bridge/BridgeHost.ts:189`](src/bridge/BridgeHost.ts#L189)):
+
 ```typescript
 if (!GUEST_ALLOWED_TYPES.has(msg.type as string)) {
   this.drop('DIRECTION_VIOLATION');
@@ -113,9 +118,15 @@ if (!GUEST_ALLOWED_TYPES.has(msg.type as string)) {
 **Why direction fires first:** if token validation ran first, an attacker could distinguish `TOKEN_INVALID` from `DIRECTION_VIOLATION` and use that as a timing oracle to enumerate valid tokens. Silent direction-first drop removes that side channel.
 
 **GUEST_ALLOWED_TYPES** ([`src/bridge/protocol.ts:5`](src/bridge/protocol.ts#L5)):
+
 ```typescript
 export const GUEST_ALLOWED_TYPES = new Set([
-  'REQUEST', 'NOTIFICATION', 'SUBSCRIBE', 'UNSUBSCRIBE', 'HANDSHAKE', 'ACK',
+  'REQUEST',
+  'NOTIFICATION',
+  'SUBSCRIBE',
+  'UNSUBSCRIBE',
+  'HANDSHAKE',
+  'ACK',
 ]);
 // PUSH, RESPONSE, HANDSHAKE_ACK are absent — guests cannot send them
 ```
@@ -126,19 +137,19 @@ export const GUEST_ALLOWED_TYPES = new Set([
 
 ## Code Tour
 
-| File | What's interesting |
-|---|---|
-| [`src/bridge/protocol.ts`](src/bridge/protocol.ts) | Message types, `GUEST_ALLOWED_TYPES` direction set, `MiniAppManifest` |
-| [`src/bridge/BridgeClient.ts`](src/bridge/BridgeClient.ts) | Injected guest script: token freeze, `bridge` API surface, pending-callback loop with 5s timeout |
-| [`src/bridge/BridgeHost.ts`](src/bridge/BridgeHost.ts) | 7-step validation pipeline, token registry, HANDSHAKE once-only, SUBSCRIBE gate, ring-buffer metrics |
-| [`src/bridge/sanitize.ts`](src/bridge/sanitize.ts) | Prototype-pollution defense: `Object.create(null)` output, blocks `__proto__`/`constructor`/`prototype` keys |
-| [`src/bridge/Backpressure.ts`](src/bridge/Backpressure.ts) | Sliding-window rate limiter; 50 msg/s → queue, 500/10s → abuse cutoff + 30s ban |
-| [`src/bridge/capabilities/FetchHandler.ts`](src/bridge/capabilities/FetchHandler.ts) | `validateUrl`: HTTPS-only, no credentials, private-IP block, allowlist; `redirect:'manual'` re-validation |
-| [`src/bridge/capabilities/StorageHandler.ts`](src/bridge/capabilities/StorageHandler.ts) | `whip::{appId}::{key}` namespace, per-app quota, chained write serialization |
-| [`src/bridge/capabilities/HapticsHandler.ts`](src/bridge/capabilities/HapticsHandler.ts) | 10 haptics/s per app, pattern map for iOS/Android |
-| [`src/components/MiniAppContainer.tsx`](src/components/MiniAppContainer.tsx) | Session lifecycle, Strict Mode double-mount fix, `crashKey` remount for crash recovery |
-| [`src/miniapps/miniApps.ts`](src/miniapps/miniApps.ts) | 7 mini apps: 1 interactive demo + 6 live attack scenarios |
-| [`__tests__/security/`](__tests__/security/) | 4 test files: token validation, direction confusion, prototype pollution, fetch guard |
+| File                                                                                     | What's interesting                                                                                           |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| [`src/bridge/protocol.ts`](src/bridge/protocol.ts)                                       | Message types, `GUEST_ALLOWED_TYPES` direction set, `MiniAppManifest`                                        |
+| [`src/bridge/BridgeClient.ts`](src/bridge/BridgeClient.ts)                               | Injected guest script: token freeze, `bridge` API surface, pending-callback loop with 5s timeout             |
+| [`src/bridge/BridgeHost.ts`](src/bridge/BridgeHost.ts)                                   | 7-step validation pipeline, token registry, HANDSHAKE once-only, SUBSCRIBE gate, ring-buffer metrics         |
+| [`src/bridge/sanitize.ts`](src/bridge/sanitize.ts)                                       | Prototype-pollution defense: `Object.create(null)` output, blocks `__proto__`/`constructor`/`prototype` keys |
+| [`src/bridge/Backpressure.ts`](src/bridge/Backpressure.ts)                               | Sliding-window rate limiter; 50 msg/s → queue, 500/10s → abuse cutoff + 30s ban                              |
+| [`src/bridge/capabilities/FetchHandler.ts`](src/bridge/capabilities/FetchHandler.ts)     | `validateUrl`: HTTPS-only, no credentials, private-IP block, allowlist; `redirect:'manual'` re-validation    |
+| [`src/bridge/capabilities/StorageHandler.ts`](src/bridge/capabilities/StorageHandler.ts) | `whip::{appId}::{key}` namespace, per-app quota, chained write serialization                                 |
+| [`src/bridge/capabilities/HapticsHandler.ts`](src/bridge/capabilities/HapticsHandler.ts) | 10 haptics/s per app, pattern map for iOS/Android                                                            |
+| [`src/components/MiniAppContainer.tsx`](src/components/MiniAppContainer.tsx)             | Session lifecycle, Strict Mode double-mount fix, `crashKey` remount for crash recovery                       |
+| [`src/miniapps/miniApps.ts`](src/miniapps/miniApps.ts)                                   | 7 mini apps: 1 interactive demo + 6 live attack scenarios                                                    |
+| [`__tests__/security/`](__tests__/security/)                                             | 4 test files: token validation, direction confusion, prototype pollution, fetch guard                        |
 
 ---
 
@@ -150,12 +161,28 @@ Measured on-device (iOS, RN 0.86 new arch, Hermes) — 1,000 iterations each. µ
 
 1,000 iterations for storage, 100 for haptics, 30 for fetch.
 
-| Capability | p50 (ms) | p99 (ms) | Notes |
-|---|---|---|---|
-| `storage.kv.get` | 0.10 | 0.31 | `AsyncStorage.getItem` |
-| `storage.kv.set` | 1.51 | 5.15 | `AsyncStorage.setItem` — SQLite write + fsync |
-| `device.haptics` | 0.06 | 0.40 | `Vibration.vibrate` scheduling overhead |
-| `network.fetch` | 300 | 1,230 | `httpbin.org/status/200`, includes DNS + TLS |
+### JSI Storage Layer
+
+Measured on-device (iOS, RN 0.86 new arch, Hermes) — 1,000 iterations each.
+
+|                                   | p50 (ms)  | p99 (ms)  |
+| --------------------------------- | --------- | --------- |
+| JSI `getSync`                     | **0.003** | **0.023** |
+| `AsyncStorage.getItem` (baseline) | 0.10      | 0.31      |
+| `AsyncStorage.setItem` (baseline) | 1.51      | 5.15      |
+
+JSI `getSync` is **30× faster than `AsyncStorage.getItem`** at p50 — zero thread hops, zero serialization. The p99 spike (0.023 ms) is HostObject property-lookup cache-miss overhead, still well under 1 ms.
+
+### WebView Bridge Capabilities
+
+Measured on-device — 1,000 iterations for storage, 100 for haptics, 30 for fetch.
+
+| Capability       | p50 (ms) | p99 (ms) | Notes                                         |
+| ---------------- | -------- | -------- | --------------------------------------------- |
+| `storage.kv.get` | 0.10     | 0.31     | `AsyncStorage.getItem`                        |
+| `storage.kv.set` | 1.51     | 5.15     | `AsyncStorage.setItem` — SQLite write + fsync |
+| `device.haptics` | 0.06     | 0.40     | `Vibration.vibrate` scheduling overhead       |
+| `network.fetch`  | 300      | 1,230    | `httpbin.org/status/200`, includes DNS + TLS  |
 
 ---
 
@@ -206,12 +233,12 @@ This removes `crashKey` entirely. The WebView reloads naturally after a crash, a
 
 ## Known Tradeoffs
 
-| Area | What we did | What a production system would do |
-|---|---|---|
-| DNS rebinding | Block private IPs by hostname string at request time | Resolve hostname to IP in native code, pin the IP for the TLS connection |
-| Redirect chains | Return 3xx + Location to guest; guest calls `bridge.fetch()` again (re-validates) | Cap redirect chain depth; native HTTP client handles this transparently |
-| Storage quota counter | In-memory; resets on process kill; self-corrects on first write | Persist counter in AsyncStorage; load on startup |
-| iOS haptic fidelity | `Vibration.vibrate` — single pulse on iOS regardless of pattern | Native module calling `UIImpactFeedbackGenerator` / `UINotificationFeedbackGenerator` |
-| Native metrics module | `WhipMetrics` is a legacy bridge module; void methods silently dropped by RN 0.86 New Architecture interop | Implement as a proper TurboModule with a codegen `.ts` spec |
-| SUBSCRIBE capability | All-or-nothing `push.subscribe`; any channel name allowed | Declare `pushChannels: string[]` in manifest; gate each SUBSCRIBE against the list |
-| `crypto.getRandomValues` fallback | Falls back to `Math.random()` if crypto unavailable | Throw on startup if crypto is unavailable; never fall back to an insecure PRNG |
+| Area                              | What we did                                                                                                | What a production system would do                                                     |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| DNS rebinding                     | Block private IPs by hostname string at request time                                                       | Resolve hostname to IP in native code, pin the IP for the TLS connection              |
+| Redirect chains                   | Return 3xx + Location to guest; guest calls `bridge.fetch()` again (re-validates)                          | Cap redirect chain depth; native HTTP client handles this transparently               |
+| Storage quota counter             | In-memory; resets on process kill; self-corrects on first write                                            | Persist counter in AsyncStorage; load on startup                                      |
+| iOS haptic fidelity               | `Vibration.vibrate` — single pulse on iOS regardless of pattern                                            | Native module calling `UIImpactFeedbackGenerator` / `UINotificationFeedbackGenerator` |
+| Native metrics module             | `WhipMetrics` is a legacy bridge module; void methods silently dropped by RN 0.86 New Architecture interop | Implement as a proper TurboModule with a codegen `.ts` spec                           |
+| SUBSCRIBE capability              | All-or-nothing `push.subscribe`; any channel name allowed                                                  | Declare `pushChannels: string[]` in manifest; gate each SUBSCRIBE against the list    |
+| `crypto.getRandomValues` fallback | Falls back to `Math.random()` if crypto unavailable                                                        | Throw on startup if crypto is unavailable; never fall back to an insecure PRNG        |

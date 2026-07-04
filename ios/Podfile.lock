@@ -1936,6 +1936,9 @@ PODS:
     - React-utils (= 0.86.0)
     - ReactNativeDependencies
   - ReactNativeDependencies (0.86.0)
+  - WhipJSI (1.0.0):
+    - React-Core
+    - React-jsi
   - Yoga (0.0.0)
 
 DEPENDENCIES:
@@ -2017,6 +2020,7 @@ DEPENDENCIES:
   - ReactCodegen (from `build/generated/ios/ReactCodegen`)
   - ReactCommon/turbomodule/core (from `../node_modules/react-native/ReactCommon`)
   - ReactNativeDependencies (from `../node_modules/react-native/third-party-podspecs/ReactNativeDependencies.podspec`)
+  - WhipJSI (from `./WhipJSI`)
   - Yoga (from `../node_modules/react-native/ReactCommon/yoga`)
 
 EXTERNAL SOURCES:
@@ -2175,6 +2179,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native/ReactCommon"
   ReactNativeDependencies:
     :podspec: "../node_modules/react-native/third-party-podspecs/ReactNativeDependencies.podspec"
+  WhipJSI:
+    :path: "./WhipJSI"
   Yoga:
     :path: "../node_modules/react-native/ReactCommon/yoga"
 
@@ -2256,8 +2262,9 @@ SPEC CHECKSUMS:
   ReactCodegen: c7a39d12bd32e7ac00d7ded981384b0f2fc7dc2f
   ReactCommon: 4d01bfb533b93a2103329dfefc74db6a9e272888
   ReactNativeDependencies: fa0a54b3f5319ae0e3b9aff32bfee7a424b88e66
-  Yoga: 94172d87dd5d83fc929bf1ee53121b5d4490b5f2
+  WhipJSI: fabf0eae1cf2b20fb5424e4f953c1ed3ae5c18f1
+  Yoga: fe50ab299e578f397fef753cf309c6703a4db29b
 
-PODFILE CHECKSUM: 33536e309f6dce3c380b0699eede7f7d8e73d704
+PODFILE CHECKSUM: 272948cebcc312b69d4fccacc82959cba029be45
 
 COCOAPODS: 1.15.2

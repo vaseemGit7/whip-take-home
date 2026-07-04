@@ -1,4 +1,4 @@
-import React, {useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useState} from 'react';
 import {
   SafeAreaView,
   ScrollView,
@@ -30,13 +30,28 @@ function pct(arr: number[], p: number) {
 function App() {
   const isDarkMode = useColorScheme() === 'dark';
   const [selected, setSelected] = useState(0);
+  const [jsiResult, setJsiResult] = useState<string>('pending…');
   const [benchResult, setBenchResult] = useState<string | null>(null);
 
   const runBenchmark = async () => {
     setBenchResult('running…');
-    const KEY = '__whip_bench__';
+    const storage = (global as any).__whipStorage;
+
+    // JSI sync — 1000 iterations (only if available)
+    let jsiLine = '';
+    if (storage) {
+      const jsiUs: number[] = [];
+      for (let i = 0; i < 1000; i++) {
+        const t0 = performance.now();
+        storage.getSync('__whip_jsi_demo__');
+        jsiUs.push((performance.now() - t0) * 1000);
+      }
+      jsiUs.sort((a, b) => a - b);
+      jsiLine = `JSI getSync   p50: ${pct(jsiUs, 0.5).toFixed(1)} µs   p99: ${pct(jsiUs, 0.99).toFixed(1)} µs\n`;
+    }
 
     // Storage — 1000 iterations
+    const KEY = '__whip_bench__';
     await AsyncStorage.setItem(KEY, 'v');
     const readUs: number[] = [];
     for (let i = 0; i < 1000; i++) {
@@ -61,7 +76,7 @@ function App() {
       const t0 = performance.now();
       Vibration.vibrate([1]);
       hapticUs.push((performance.now() - t0) * 1000);
-      await new Promise(r => setTimeout(r, 20)); // let device recover
+      await new Promise(r => setTimeout(r, 20));
     }
     hapticUs.sort((a, b) => a - b);
 
@@ -80,6 +95,7 @@ function App() {
     fetchMs.sort((a, b) => a - b);
 
     const r =
+      jsiLine +
       `storage.get   p50: ${pct(readUs, 0.5).toFixed(0)} µs  p99: ${pct(readUs, 0.99).toFixed(0)} µs\n` +
       `storage.set   p50: ${pct(writeUs, 0.5).toFixed(0)} µs  p99: ${pct(writeUs, 0.99).toFixed(0)} µs\n` +
       `haptics       p50: ${pct(hapticUs, 0.5).toFixed(0)} µs  p99: ${pct(hapticUs, 0.99).toFixed(0)} µs\n` +
@@ -103,6 +119,22 @@ function App() {
     return host;
   }, []);
 
+  // JSI smoke-test: verify global.__whipStorage was installed by WhipJSIInstaller.
+  // This runs in the Hermes runtime (RN JS thread) — NOT in a WebView context.
+  // WebView JS contexts are isolated from Hermes by design (the security model).
+  // The synchronous return proves no async hop or event-loop yield occurred.
+  useEffect(() => {
+    const storage = (global as any).__whipStorage;
+    if (storage) {
+      const val: string | null = storage.getSync('__whip_jsi_demo__');
+      console.log('[WhipBridge JSI] getSync result:', val);
+      setJsiResult(val ?? 'null');
+    } else {
+      console.warn('[WhipBridge JSI] __whipStorage not installed');
+      setJsiResult('NOT INSTALLED');
+    }
+  }, []);
+
   const app = MINI_APPS[selected];
 
   return (
@@ -110,6 +142,11 @@ function App() {
       <SafeAreaView style={styles.root}>
         <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
         <View style={styles.root}>
+          {/* ── JSI smoke-test banner ── */}
+          <View style={[styles.jsiBanner, jsiResult === 'jsi-is-synchronous' ? styles.jsiBannerOk : styles.jsiBannerFail]}>
+            <Text style={styles.jsiBannerText}>JSI: {jsiResult}</Text>
+          </View>
+
           {/* ── Benchmark ── */}
           <TouchableOpacity style={styles.benchBtn} onPress={runBenchmark}>
             <Text style={styles.benchBtnText}>Run Full Benchmark</Text>
@@ -168,6 +205,10 @@ const styles = StyleSheet.create({
   tabActive: {backgroundColor: '#4361ee'},
   tabText: {fontSize: 12, color: '#888', fontWeight: '600'},
   tabTextActive: {color: '#fff'},
+  jsiBanner: {paddingHorizontal: 12, paddingVertical: 4},
+  jsiBannerOk: {backgroundColor: '#1a3a1a'},
+  jsiBannerFail: {backgroundColor: '#3a1a1a'},
+  jsiBannerText: {fontSize: 11, color: '#aaa', fontFamily: 'Menlo'},
   benchBtn: {margin: 8, padding: 8, backgroundColor: '#2a2a3e', borderRadius: 8, alignItems: 'center'},
   benchBtnText: {color: '#4361ee', fontSize: 12, fontWeight: '600'},
   benchResult: {marginHorizontal: 8, padding: 8, backgroundColor: '#111', borderRadius: 6},

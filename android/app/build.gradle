@@ -78,12 +78,36 @@ android {
     compileSdk rootProject.ext.compileSdkVersion
 
     namespace "com.whipbridge"
+
+    // prefab = true allows CMakeLists.txt to use find_package(ReactAndroid)
+    // to consume the JSI headers and libhermes symbols shipped by RN 0.76+.
+    buildFeatures {
+        prefab true
+    }
+
     defaultConfig {
         applicationId "com.whipbridge"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+
+        externalNativeBuild {
+            cmake {
+                cppFlags "-std=c++17"
+                // ANDROID_STL=c++_shared: use the shared C++ STL so JSI's
+                // std::shared_ptr ABI matches Hermes's STL.
+                arguments "-DANDROID_STL=c++_shared"
+            }
+        }
+    }
+
+    // Tell Gradle where our CMakeLists.txt lives.
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
+            version "3.22.1"
+        }
     }
     signingConfigs {
         debug {

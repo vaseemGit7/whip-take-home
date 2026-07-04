@@ -17,6 +17,10 @@ end
 target 'WhipBridge' do
   config = use_native_modules!
 
+  # Local pod: JSI storage HostObject (raw JSI, no TurboModule codegen).
+  # Files live in ios/WhipJSI/ — no Xcode pbxproj editing required.
+  pod 'WhipJSI', :path => './WhipJSI'
+
   use_react_native!(
     :path => config[:reactNativePath],
     # An absolute path to your application root.
