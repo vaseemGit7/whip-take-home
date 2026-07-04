@@ -36,6 +36,14 @@ export function getBridgeClientScript(): string {
 
   // Entry point for all host → guest messages.
   // Host calls: window.__bridgeDispatch(JSON.stringify(msg))
+  //
+  // On Android, injectedJavaScriptBeforeContentLoaded runs AFTER the page's
+  // inline <script> tags, so a mini app's wrapper may already be installed on
+  // window.__bridgeDispatch. We chain to it instead of overwriting it, so the
+  // UI update in the wrapper fires regardless of which script ran first.
+  var _preExistingDispatch = (typeof window.__bridgeDispatch === 'function')
+    ? window.__bridgeDispatch : null;
+
   window.__bridgeDispatch = function(raw) {
     var msg;
     try { msg = JSON.parse(raw); } catch (e) { return; }
@@ -64,6 +72,9 @@ export function getBridgeClientScript(): string {
         console.error('[WhipBridge] Handshake failed:', msg.error);
       }
     }
+
+    // Forward to any pre-existing handler (mini app UI wrapper on Android)
+    if (_preExistingDispatch) { try { _preExistingDispatch(raw); } catch(e) {} }
   };
 
   function request(capability, method, payload) {
