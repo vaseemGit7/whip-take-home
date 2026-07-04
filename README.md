@@ -1,6 +1,6 @@
 # WhipBridge
 
-**Loom walkthrough (5 min):** [LOOM_URL_HERE]
+** Walkthrough Video (10 min):** [https://drive.google.com/file/d/1WBNtVxqDTzA4F_egq_IswnR0gcwDm9li/view?usp=sharing]
 
 A React Native host application that loads untrusted mini apps inside sandboxed WebViews and brokers capability requests through a typed, token-authenticated bridge protocol.
 
