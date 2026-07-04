@@ -7,8 +7,10 @@ import {
   Text,
   TouchableOpacity,
   useColorScheme,
+  Vibration,
   View,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
 
 import {BridgeHost} from './src/bridge/BridgeHost';
@@ -21,9 +23,70 @@ import {FetchHandler} from './src/bridge/capabilities/FetchHandler';
 import NativeWhipMetrics from './src/native/NativeWhipMetrics';
 import {MINI_APPS} from './src/miniapps/miniApps';
 
+function pct(arr: number[], p: number) {
+  return arr[Math.min(Math.floor(arr.length * p), arr.length - 1)];
+}
+
 function App() {
   const isDarkMode = useColorScheme() === 'dark';
   const [selected, setSelected] = useState(0);
+  const [benchResult, setBenchResult] = useState<string | null>(null);
+
+  const runBenchmark = async () => {
+    setBenchResult('running…');
+    const KEY = '__whip_bench__';
+
+    // Storage — 1000 iterations
+    await AsyncStorage.setItem(KEY, 'v');
+    const readUs: number[] = [];
+    for (let i = 0; i < 1000; i++) {
+      const t0 = performance.now();
+      await AsyncStorage.getItem(KEY);
+      readUs.push((performance.now() - t0) * 1000);
+    }
+    readUs.sort((a, b) => a - b);
+
+    const writeUs: number[] = [];
+    for (let i = 0; i < 1000; i++) {
+      const t0 = performance.now();
+      await AsyncStorage.setItem(KEY, String(i));
+      writeUs.push((performance.now() - t0) * 1000);
+    }
+    writeUs.sort((a, b) => a - b);
+    await AsyncStorage.removeItem(KEY);
+
+    // Haptics — 100 iterations of minimal 1 ms pulse
+    const hapticUs: number[] = [];
+    for (let i = 0; i < 100; i++) {
+      const t0 = performance.now();
+      Vibration.vibrate([1]);
+      hapticUs.push((performance.now() - t0) * 1000);
+      await new Promise(r => setTimeout(r, 20)); // let device recover
+    }
+    hapticUs.sort((a, b) => a - b);
+
+    // Network fetch — 30 iterations to a lightweight endpoint
+    const fetchMs: number[] = [];
+    for (let i = 0; i < 30; i++) {
+      const t0 = performance.now();
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 5000);
+        await fetch('https://httpbin.org/status/200', {signal: ctrl.signal});
+        clearTimeout(timer);
+      } catch {}
+      fetchMs.push(performance.now() - t0);
+    }
+    fetchMs.sort((a, b) => a - b);
+
+    const r =
+      `storage.get   p50: ${pct(readUs, 0.5).toFixed(0)} µs  p99: ${pct(readUs, 0.99).toFixed(0)} µs\n` +
+      `storage.set   p50: ${pct(writeUs, 0.5).toFixed(0)} µs  p99: ${pct(writeUs, 0.99).toFixed(0)} µs\n` +
+      `haptics       p50: ${pct(hapticUs, 0.5).toFixed(0)} µs  p99: ${pct(hapticUs, 0.99).toFixed(0)} µs\n` +
+      `fetch         p50: ${pct(fetchMs, 0.5).toFixed(1)} ms  p99: ${pct(fetchMs, 0.99).toFixed(1)} ms`;
+    console.log('[WhipBridge Bench]\n' + r);
+    setBenchResult(r);
+  };
 
   const bridgeHost = useMemo(() => {
     const router = new CapabilityRouter();
@@ -47,6 +110,16 @@ function App() {
       <SafeAreaView style={styles.root}>
         <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
         <View style={styles.root}>
+          {/* ── Benchmark ── */}
+          <TouchableOpacity style={styles.benchBtn} onPress={runBenchmark}>
+            <Text style={styles.benchBtnText}>Run Full Benchmark</Text>
+          </TouchableOpacity>
+          {benchResult ? (
+            <View style={styles.benchResult}>
+              <Text style={styles.benchResultText}>{benchResult}</Text>
+            </View>
+          ) : null}
+
           {/* ── Tab bar ── */}
           <ScrollView
             horizontal
@@ -95,6 +168,10 @@ const styles = StyleSheet.create({
   tabActive: {backgroundColor: '#4361ee'},
   tabText: {fontSize: 12, color: '#888', fontWeight: '600'},
   tabTextActive: {color: '#fff'},
+  benchBtn: {margin: 8, padding: 8, backgroundColor: '#2a2a3e', borderRadius: 8, alignItems: 'center'},
+  benchBtnText: {color: '#4361ee', fontSize: 12, fontWeight: '600'},
+  benchResult: {marginHorizontal: 8, padding: 8, backgroundColor: '#111', borderRadius: 6},
+  benchResultText: {color: '#aaa', fontSize: 11, fontFamily: 'Menlo'},
 });
 
 export default App;
