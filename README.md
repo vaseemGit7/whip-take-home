@@ -133,6 +133,18 @@ export const GUEST_ALLOWED_TYPES = new Set([
 
 **Test coverage:** 6 direction-confusion tests cover silent drop, no-response guarantee, and ordering invariant. 2 end-to-end tests verify a legitimate host PUSH still reaches the victim while an attacker PUSH does not.
 
+**Why this is Whip-specific.** The attack exploits three properties of Whip's architecture that don't exist in typical embedded-WebView systems:
+
+1. **Multi-tenant untrusted code in a single host process.** Whip runs multiple untrusted mini apps simultaneously in the same React Native app. Most apps have one WebView showing trusted content, or if untrusted, only one at a time. Running N mutually-distrusting tenants in the same process is what creates the cross-app injection path.
+
+2. **Shared subscription channels for cross-app coordination.** Whip's push model mirrors WeChat mini programs: host-initiated events (theme changes, market prices, host state) fan out to every mini app subscribed to that channel. A guest that can fabricate a PUSH message can inject into every subscriber simultaneously — the shared channel is what makes the blast radius unbounded.
+
+3. **Per-mini-app isolation as the explicit security promise.** The capability system promises that mini app A cannot affect mini app B. Direction abuse breaks this guarantee at the protocol layer, not through content manipulation or quota exhaustion. It's a violation of the security model, not just a nuisance.
+
+**Impact contrast.** In a single-tenant embedded WebView — a browser tab, a documentation viewer, a one-off hybrid app — a guest spoofing its own PUSH message type is a self-attack. The guest is fooling itself. In Whip's multi-tenant model, the same attack becomes cross-tenant data injection: one malicious mini app can inject attacker-controlled payloads into every other subscribing mini app on the device. One bad install affects the entire subscription ecosystem on that user's device.
+
+A useful test: can you name architectures where the attack matters less? For direction abuse — yes. Single-tenant WebView systems: self-attack only, no cross-app path. Point-to-point IPC without subscription channels: no fanout target. Systems where mini apps don't share push channels: the attack surface doesn't exist. Naming those weaker cases is what makes this Whip-specific rather than generic protocol hardening.
+
 ---
 
 ## Code Tour
