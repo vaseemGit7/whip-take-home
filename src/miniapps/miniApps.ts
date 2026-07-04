@@ -119,11 +119,11 @@ const DEMO_HTML = `<!DOCTYPE html>
         .catch(function(e) { log('\\u2717 Haptics: ' + e.message, 'err'); });
     }
     function testFetch() {
-      log('\\u23f3 Fetching https://httpbin.org/get…', 'info');
-      bridge.fetch('https://httpbin.org/get', {method: 'GET'})
+      log('\\u23f3 Fetching https://jsonplaceholder.typicode.com/todos/1…', 'info');
+      bridge.fetch('https://jsonplaceholder.typicode.com/todos/1', {method: 'GET'})
         .then(function(res) {
           var body = JSON.parse(res.body);
-          log('\\u2713 fetch OK — status=' + res.status + '  url=' + body.url, 'ok');
+          log('\\u2713 fetch OK — status=' + res.status + '  title=' + body.title, 'ok');
         })
         .catch(function(e) { log('\\u2717 Fetch: ' + e.message, 'err'); });
     }
