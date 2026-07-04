@@ -26,23 +26,23 @@ class MainApplication : Application(), ReactApplication {
   override fun onCreate() {
     super.onCreate()
 
-    // Register the JSI installer before loadReactNative() so it fires
-    // as soon as the React context is ready.
-    //
-    // ReactInstanceEventListener.onReactContextInitialized fires on the JS
-    // thread — the only thread allowed to access the JSI Runtime.
-    // javaScriptContextHolder.get() returns the raw Runtime* pointer as a Long,
-    // which we pass directly to our JNI function.
+    // loadReactNative initializes SoLoader — must run before reactHost is accessed.
+    loadReactNative(this)
+
+    // JSI install must happen on the JS thread. onReactContextInitialized fires on the
+    // UI thread, so we post the actual install via runOnJSQueueThread.
+    // javaScriptContextHolder is captured before posting — it remains valid for the
+    // lifetime of the ReactInstance and is safe to read from any thread.
     reactHost.addReactInstanceEventListener(object : ReactInstanceEventListener {
       override fun onReactContextInitialized(context: ReactContext) {
         val holder = context.javaScriptContextHolder ?: return
-        val ptr = holder.get()
-        if (ptr != 0L) {
-          WhipJSIInstaller.install(ptr)
+        context.runOnJSQueueThread {
+          val ptr = holder.get()
+          if (ptr != 0L) {
+            WhipJSIInstaller.install(ptr)
+          }
         }
       }
     })
-
-    loadReactNative(this)
   }
 }

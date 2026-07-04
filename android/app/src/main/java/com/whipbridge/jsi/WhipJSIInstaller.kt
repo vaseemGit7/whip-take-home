@@ -8,7 +8,9 @@ package com.whipbridge.jsi
 // safe thread from which to access the JSI Runtime.
 object WhipJSIInstaller {
     init {
-        System.loadLibrary("whipjsi")
+        // SoLoader (not System.loadLibrary) handles RN's native lib dependencies correctly.
+        // SoLoader.init() is guaranteed to run first via loadReactNative() in Application.onCreate().
+        com.facebook.soloader.SoLoader.loadLibrary("whipjsi")
     }
 
     // Installs global.__whipStorage into the Hermes runtime.

@@ -36,7 +36,9 @@ Value WhipStorageHostObject::get(Runtime& rt, const PropNameID& name) {
 }
 
 std::vector<PropNameID> WhipStorageHostObject::getPropertyNames(Runtime& rt) {
-  return {PropNameID::forAscii(rt, "getSync")};
+  std::vector<PropNameID> names;
+  names.push_back(PropNameID::forAscii(rt, "getSync"));
+  return names;
 }
 
 void WhipStorageHostObject::install(Runtime& rt) {
