@@ -143,7 +143,7 @@ export const GUEST_ALLOWED_TYPES = new Set([
 | [`src/bridge/BridgeClient.ts`](src/bridge/BridgeClient.ts)                               | Injected guest script: token freeze, `bridge` API surface, pending-callback loop with 5s timeout             |
 | [`src/bridge/BridgeHost.ts`](src/bridge/BridgeHost.ts)                                   | 7-step validation pipeline, token registry, HANDSHAKE once-only, SUBSCRIBE gate, ring-buffer metrics         |
 | [`src/bridge/sanitize.ts`](src/bridge/sanitize.ts)                                       | Prototype-pollution defense: `Object.create(null)` output, blocks `__proto__`/`constructor`/`prototype` keys |
-| [`src/bridge/Backpressure.ts`](src/bridge/Backpressure.ts)                               | Sliding-window rate limiter; 50 msg/s → queue, 500/10s → abuse cutoff + 30s ban                              |
+| [`src/bridge/Backpressure.ts`](src/bridge/Backpressure.ts)                               | Sliding-window rate limiter; 50 msg/s → queue, 500/10s → abuse cutoff + session terminated                   |
 | [`src/bridge/capabilities/FetchHandler.ts`](src/bridge/capabilities/FetchHandler.ts)     | `validateUrl`: HTTPS-only, no credentials, private-IP block, allowlist; `redirect:'manual'` re-validation    |
 | [`src/bridge/capabilities/StorageHandler.ts`](src/bridge/capabilities/StorageHandler.ts) | `whip::{appId}::{key}` namespace, per-app quota, chained write serialization                                 |
 | [`src/bridge/capabilities/HapticsHandler.ts`](src/bridge/capabilities/HapticsHandler.ts) | 10 haptics/s per app, pattern map for iOS/Android                                                            |
@@ -155,34 +155,32 @@ export const GUEST_ALLOWED_TYPES = new Set([
 
 ## Performance
 
-Measured on-device (iOS, RN 0.86 new arch, Hermes) — 1,000 iterations each. µs = microseconds (0.001 ms).
+Physical device, RN 0.86 new arch, Hermes. µs = microseconds (0.001 ms).
 
-### Capability handler latency (this branch — no JSI)
+### WebView bridge baseline (no JSI)
 
 1,000 iterations for storage, 100 for haptics, 30 for fetch.
 
-### JSI Storage Layer
+| Capability       | iOS p50 (ms) | iOS p99 (ms) | Android p50 (ms) | Android p99 (ms) | Notes                                        |
+| ---------------- | ------------ | ------------ | ---------------- | ---------------- | -------------------------------------------- |
+| `storage.kv.get` | 0.10         | 0.31         | 14.7             | 28.2             | `AsyncStorage.getItem`                       |
+| `storage.kv.set` | 1.51         | 5.15         | 13.4             | 27.1             | `AsyncStorage.setItem` — SQLite write        |
+| `device.haptics` | 0.06         | 0.40         | 0.82             | 7.16             | `Vibration.vibrate` scheduling overhead      |
+| `network.fetch`  | 300          | 1,230        | 331.5            | 1,914            | `jsonplaceholder.typicode.com/todos/1`, DNS + TLS |
 
-Measured on-device (iOS, RN 0.86 new arch, Hermes) — 1,000 iterations each.
+Android AsyncStorage is ~150× slower than iOS at p50 because Android uses a write-ahead SQLite database per call; iOS uses a plist serialized to disk.
 
-|                                   | p50 (ms)  | p99 (ms)  |
-| --------------------------------- | --------- | --------- |
-| JSI `getSync`                     | **0.003** | **0.023** |
-| `AsyncStorage.getItem` (baseline) | 0.10      | 0.31      |
-| `AsyncStorage.setItem` (baseline) | 1.51      | 5.15      |
+### JSI storage layer
 
-JSI `getSync` is **30× faster than `AsyncStorage.getItem`** at p50 — zero thread hops, zero serialization. The p99 spike (0.023 ms) is HostObject property-lookup cache-miss overhead, still well under 1 ms.
+1,000 iterations each.
 
-### WebView Bridge Capabilities
+|                                   | iOS p50 (ms) | iOS p99 (ms) | Android p50 (ms) | Android p99 (ms) |
+| --------------------------------- | ------------ | ------------ | ---------------- | ---------------- |
+| JSI `getSync`                     | **0.003**    | **0.023**    | **0.004**        | **0.007**        |
+| `AsyncStorage.getItem` (baseline) | 0.10         | 0.31         | 14.7             | 28.2             |
+| `AsyncStorage.setItem` (baseline) | 1.51         | 5.15         | 13.4             | 27.1             |
 
-Measured on-device — 1,000 iterations for storage, 100 for haptics, 30 for fetch.
-
-| Capability       | p50 (ms) | p99 (ms) | Notes                                         |
-| ---------------- | -------- | -------- | --------------------------------------------- |
-| `storage.kv.get` | 0.10     | 0.31     | `AsyncStorage.getItem`                        |
-| `storage.kv.set` | 1.51     | 5.15     | `AsyncStorage.setItem` — SQLite write + fsync |
-| `device.haptics` | 0.06     | 0.40     | `Vibration.vibrate` scheduling overhead       |
-| `network.fetch`  | 300      | 1,230    | `httpbin.org/status/200`, includes DNS + TLS  |
+JSI `getSync` is **30× faster** than `AsyncStorage.getItem` on iOS and **~4,000× faster** on Android — both platforms share the same C++ HostObject; the gap is wider on Android because AsyncStorage's SQLite path is heavier than iOS's NSUserDefaults serialization.
 
 ---
 
@@ -192,7 +190,7 @@ The current crash recovery (`crashKey` remount) works correctly but is blunt: it
 
 **The root obstacle.** The session token is delivered via `injectedJavaScriptBeforeContentLoaded`, which is baked in at mount time. After a crash-reload, the page re-runs that script with the now-invalid token — the host has already cleaned it up. The old `reload()` approach failed because of this.
 
-The fix was to remount (via `key={crashKey}`) so the new token lands in `injectedJavaScriptBeforeContentLoaded`. But remounting is expensive. The reason we can't simply inject the new token post-reload with `injectJavaScript` is that `BridgeClient.ts:18` captures the token in a closed-over local variable at script-load time:
+The fix was to remount (via `key={crashKey}`) so the new token lands in `injectedJavaScriptBeforeContentLoaded`. But remounting is expensive. The reason I can't simply inject the new token post-reload with `injectJavaScript` is that `BridgeClient.ts:18` captures the token in a closed-over local variable at script-load time:
 
 ```typescript
 // BridgeClient.ts:18 — captured once at script execution, never re-read
@@ -233,7 +231,7 @@ This removes `crashKey` entirely. The WebView reloads naturally after a crash, a
 
 ## Known Tradeoffs
 
-| Area                              | What we did                                                                                                | What a production system would do                                                     |
+| Area                              | What I did                                                                                                | What a production system would do                                                     |
 | --------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
 | DNS rebinding                     | Block private IPs by hostname string at request time                                                       | Resolve hostname to IP in native code, pin the IP for the TLS connection              |
 | Redirect chains                   | Return 3xx + Location to guest; guest calls `bridge.fetch()` again (re-validates)                          | Cap redirect chain depth; native HTTP client handles this transparently               |
