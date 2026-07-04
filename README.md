@@ -28,7 +28,7 @@ A React Native host application that loads untrusted mini apps inside sandboxed 
 | Android Studio + SDK | compileSdk 36, minSdk 24       |
 
 ```sh
-git clone <repo-url> && cd WhipBridge
+git clone https://github.com/vaseemGit7/whip-take-home.git && cd whip-take-home
 npm install
 bundle install                                      # iOS only — installs CocoaPods via Bundler
 bundle exec pod install --project-directory=ios     # iOS only
