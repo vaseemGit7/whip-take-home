@@ -123,16 +123,27 @@ function App() {
   // This runs in the Hermes runtime (RN JS thread) — NOT in a WebView context.
   // WebView JS contexts are isolated from Hermes by design (the security model).
   // The synchronous return proves no async hop or event-loop yield occurred.
+  //
+  // On Android, runOnJSQueueThread installs the HostObject after the initial
+  // render (bundle runs first, then the queued task). Retry for up to 2s so
+  // the banner doesn't permanently show NOT INSTALLED on Android.
   useEffect(() => {
-    const storage = (global as any).__whipStorage;
-    if (storage) {
-      const val: string | null = storage.getSync('__whip_jsi_demo__');
-      console.log('[WhipBridge JSI] getSync result:', val);
-      setJsiResult(val ?? 'null');
-    } else {
-      console.warn('[WhipBridge JSI] __whipStorage not installed');
-      setJsiResult('NOT INSTALLED');
-    }
+    let attempts = 0;
+    const tryCheck = () => {
+      const storage = (global as any).__whipStorage;
+      if (storage) {
+        const val: string | null = storage.getSync('__whip_jsi_demo__');
+        console.log('[WhipBridge JSI] getSync result:', val);
+        setJsiResult(val ?? 'null');
+      } else if (attempts < 10) {
+        attempts++;
+        setTimeout(tryCheck, 200);
+      } else {
+        console.warn('[WhipBridge JSI] __whipStorage not installed after 2s');
+        setJsiResult('NOT INSTALLED');
+      }
+    };
+    tryCheck();
   }, []);
 
   const app = MINI_APPS[selected];
