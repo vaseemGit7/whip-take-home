@@ -21,9 +21,46 @@ import {FetchHandler} from './src/bridge/capabilities/FetchHandler';
 import NativeWhipMetrics from './src/native/NativeWhipMetrics';
 import {MINI_APPS} from './src/miniapps/miniApps';
 
+function pct(arr: number[], p: number) {
+  return arr[Math.min(Math.floor(arr.length * p), arr.length - 1)];
+}
+
 function App() {
   const isDarkMode = useColorScheme() === 'dark';
   const [selected, setSelected] = useState(0);
+  const [jsiResult, setJsiResult] = useState<string>('pending…');
+  const [benchResult, setBenchResult] = useState<string | null>(null);
+
+  const runBenchmark = async () => {
+    const storage = (global as any).__whipStorage;
+    if (!storage) { setBenchResult('JSI not installed'); return; }
+    setBenchResult('running…');
+
+    // JSI sync — 1 000 iterations
+    const jsiUs: number[] = [];
+    for (let i = 0; i < 1000; i++) {
+      const t0 = performance.now();
+      storage.getSync('__whip_jsi_demo__');
+      jsiUs.push((performance.now() - t0) * 1000);
+    }
+    jsiUs.sort((a, b) => a - b);
+
+    // Async baseline (setImmediate round-trip) — 100 iterations
+    const asyncUs: number[] = [];
+    for (let i = 0; i < 100; i++) {
+      await new Promise<void>(resolve => {
+        const t0 = performance.now();
+        setImmediate(() => { asyncUs.push((performance.now() - t0) * 1000); resolve(); });
+      });
+    }
+    asyncUs.sort((a, b) => a - b);
+
+    const r =
+      `JSI getSync   p50: ${pct(jsiUs, 0.5).toFixed(1)} µs   p99: ${pct(jsiUs, 0.99).toFixed(1)} µs\n` +
+      `async (setImmediate) p50: ${pct(asyncUs, 0.5).toFixed(0)} µs   p99: ${pct(asyncUs, 0.99).toFixed(0)} µs`;
+    console.log('[WhipBridge Bench]\n' + r);
+    setBenchResult(r);
+  };
 
   const bridgeHost = useMemo(() => {
     const router = new CapabilityRouter();
@@ -49,9 +86,10 @@ function App() {
     if (storage) {
       const val: string | null = storage.getSync('__whip_jsi_demo__');
       console.log('[WhipBridge JSI] getSync result:', val);
-      // Expected: "[WhipBridge JSI] getSync result: jsi-is-synchronous"
+      setJsiResult(val ?? 'null');
     } else {
       console.warn('[WhipBridge JSI] __whipStorage not installed');
+      setJsiResult('NOT INSTALLED');
     }
   }, []);
 
@@ -62,6 +100,21 @@ function App() {
       <SafeAreaView style={styles.root}>
         <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
         <View style={styles.root}>
+          {/* ── JSI smoke-test banner ── */}
+          <View style={[styles.jsiBanner, jsiResult === 'jsi-is-synchronous' ? styles.jsiBannerOk : styles.jsiBannerFail]}>
+            <Text style={styles.jsiBannerText}>JSI: {jsiResult}</Text>
+          </View>
+
+          {/* ── Benchmark ── */}
+          <TouchableOpacity style={styles.benchBtn} onPress={runBenchmark}>
+            <Text style={styles.benchBtnText}>Run JSI Benchmark</Text>
+          </TouchableOpacity>
+          {benchResult ? (
+            <View style={styles.benchResult}>
+              <Text style={styles.benchResultText}>{benchResult}</Text>
+            </View>
+          ) : null}
+
           {/* ── Tab bar ── */}
           <ScrollView
             horizontal
@@ -110,6 +163,14 @@ const styles = StyleSheet.create({
   tabActive: {backgroundColor: '#4361ee'},
   tabText: {fontSize: 12, color: '#888', fontWeight: '600'},
   tabTextActive: {color: '#fff'},
+  jsiBanner: {paddingHorizontal: 12, paddingVertical: 4},
+  jsiBannerOk: {backgroundColor: '#1a3a1a'},
+  jsiBannerFail: {backgroundColor: '#3a1a1a'},
+  jsiBannerText: {fontSize: 11, color: '#aaa', fontFamily: 'Menlo'},
+  benchBtn: {margin: 8, padding: 8, backgroundColor: '#2a2a3e', borderRadius: 8, alignItems: 'center'},
+  benchBtnText: {color: '#4361ee', fontSize: 12, fontWeight: '600'},
+  benchResult: {marginHorizontal: 8, padding: 8, backgroundColor: '#111', borderRadius: 6},
+  benchResultText: {color: '#aaa', fontSize: 11, fontFamily: 'Menlo'},
 });
 
 export default App;

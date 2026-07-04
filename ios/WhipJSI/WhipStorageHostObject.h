@@ -2,7 +2,6 @@
 #include <jsi/jsi.h>
 #include <memory>
 #include <string>
-#include <unordered_map>
 
 namespace whip {
 
@@ -35,10 +34,6 @@ class WhipStorageHostObject
   // Install this HostObject as global.__whipStorage in the given runtime.
   static void install(facebook::jsi::Runtime& rt);
 
- private:
-  // In-memory store. In production this would delegate to MMKV or
-  // NSUserDefaults (iOS) / SharedPreferences (Android) for durability.
-  std::unordered_map<std::string, std::string> store_;
 };
 
 }  // namespace whip
